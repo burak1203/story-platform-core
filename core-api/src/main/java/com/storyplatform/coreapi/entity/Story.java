@@ -3,6 +3,7 @@ package com.storyplatform.coreapi.entity;
 import jakarta.persistence.*;
 import lombok.*;
 import java.time.LocalDateTime;
+import com.pgvector.PGvector;
 
 @Entity
 @Table(name = "stories")
@@ -28,6 +29,11 @@ public class Story {
     // Yapay zeka henüz yazıyor mu, bitti mi, yoksa hata mı verdi? (PENDING, GENERATING, COMPLETED, FAILED)
     @Column(nullable = false)
     private String status;
+
+    // Yapay zekanın metni anlamsal sayılara (koordinatlara) çevirdiği halini burada tutacağız.
+    // 1536 rakamı, sektör standardı olan OpenAI (text-embedding-3-small) veya benzer boyutlu dil modellerinin vektör formatıdır.
+    @Column(columnDefinition = "vector(1536)")
+    private PGvector embedding;
 
     // Kritik Nokta: Hikayeyi Kullanıcıya Bağlayan Halat
     @ManyToOne(fetch = FetchType.LAZY)
