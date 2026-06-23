@@ -16,4 +16,13 @@ public class KafkaTopicConfig {
                 .replicas(1)
                 .build();
     }
+
+    // Spring Boot başlarken bu metodu da çalıştırıp geri dönüş odasını açacak
+    @Bean
+    public NewTopic storyCompletedTopic() {
+        return TopicBuilder.name("story-completed-topic")
+                .partitions(1)
+                .replicas(1)
+                .build();
+    }
 }
