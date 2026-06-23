@@ -7,8 +7,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
+import java.util.List;
 import java.util.Map;
+import com.pgvector.PGvector;
 
 @Service
 @RequiredArgsConstructor
@@ -17,28 +18,33 @@ public class StoryConsumer {
 
     private final StoryRepository storyRepository;
 
-    // Python'un mesaj fırlattığı odayı (topic) dinliyoruz
     @KafkaListener(topics = "story-completed-topic", groupId = "story-platform-group")
     @Transactional
     public void consumeCompletedStory(Map<String, Object> payload) {
-        log.info("Python'dan tamamlanmış hikaye geldi: {}", payload);
+        log.info("Python'dan tamamlanmış hikaye geldi, ID: {}", payload.get("storyId"));
 
         String event = (String) payload.get("event");
         if ("STORY_COMPLETED".equals(event)) {
-            // Python'dan gelen ID'yi güvenli şekilde alıyoruz
             Long storyId = ((Number) payload.get("storyId")).longValue();
             String content = (String) payload.get("content");
 
-            // Veritabanından o anki PENDING durumundaki hikayeyi buluyoruz
+            // 1. Python'dan gelen sayı listesini al
+            List<Double> embeddingList = (List<Double>) payload.get("embedding");
+
             Story story = storyRepository.findById(storyId)
                     .orElseThrow(() -> new RuntimeException("Hikaye bulunamadı: " + storyId));
 
-            // İçeriği doldurup statüyü COMPLETED yapıyoruz
             story.setContent(content);
             story.setStatus("COMPLETED");
+
+            // 2. Listeyi doğrudan "[0.12, 0.45...]" formatında standart bir metne çevirip kaydet
+            if (embeddingList != null) {
+                story.setEmbedding(embeddingList.toString());
+            }
+
             storyRepository.save(story);
 
-            log.info("Hikaye {} veritabanına COMPLETED olarak başarıyla kaydedildi.", storyId);
+            log.info("Hikaye {} veritabanına metni ve vektör hafızasıyla (Embedding) başarıyla kaydedildi.", storyId);
         }
     }
 }

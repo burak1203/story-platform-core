@@ -1,8 +1,5 @@
 # Java & Spring Boot
 core-api/target/
-core-api/.mvn/
-core-api/mvnw
-core-api/mvnw.cmd
 *.class
 
 # Python & FastAPI

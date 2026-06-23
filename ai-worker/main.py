@@ -2,14 +2,20 @@ from fastapi import FastAPI
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 import asyncio
 import json
+import random
 
 app = FastAPI(title="Story AI Worker")
 
-# İleride OpenRouter/Gemini API çağrısını tam olarak buraya yazacağız.
-# Şimdilik döngüyü test etmek için 3 saniye bekleyen bir simülasyon kuruyoruz.
-async def generate_story_from_llm(prompt: str) -> str:
-    await asyncio.sleep(3) 
-    return f"Yapay zeka tarafından '{prompt}' temel alınarak üretilmiş destansı bir hikaye..."
+async def generate_mock_story_and_embedding(prompt: str):
+    # 1. Metin Üretimi Simülasyonu
+    await asyncio.sleep(2)
+    story_text = f"Yapay zeka tarafından '{prompt}' temel alınarak üretilmiş destansı bir hikaye..."
+    
+    # 2. Vektör (Embedding) Simülasyonu (OpenAI text-embedding-3-small standardı: 1536 boyut)
+    # Gerçek yapay zeka hafızası tam olarak böyle sayılardan oluşur.
+    mock_embedding = [random.uniform(-1.0, 1.0) for _ in range(1536)]
+    
+    return story_text, mock_embedding
 
 async def consume_messages():
     consumer = AIOKafkaConsumer(
@@ -18,7 +24,6 @@ async def consume_messages():
         value_deserializer=lambda m: json.loads(m.decode('utf-8'))
     )
     
-    # Python'un Java'ya cevap verebilmesi için Producer ekliyoruz
     producer = AIOKafkaProducer(
         bootstrap_servers='localhost:9092',
         value_serializer=lambda v: json.dumps(v).encode('utf-8')
@@ -26,7 +31,7 @@ async def consume_messages():
     
     await consumer.start()
     await producer.start()
-    print("AI Worker dinliyor ve yanıt vermeye hazır...")
+    print("🎧 AI Worker dinliyor ve vektör üretmeye hazır...")
     
     try:
         async for msg in consumer:
@@ -36,20 +41,21 @@ async def consume_messages():
             if event == 'GENERATE_STORY':
                 story_id = task_data.get('storyId')
                 prompt = task_data.get('prompt')
-                print(f"[{story_id}] ID'li hikaye üretiliyor. İstek: {prompt}")
+                print(f"[{story_id}] ID'li hikaye için metin ve hafıza (vektör) üretiliyor...")
                 
-                # 1. Yapay Zekadan metni al
-                generated_text = await generate_story_from_llm(prompt)
+                # LLM'den metni ve vektörü al
+                generated_text, embedding_vector = await generate_mock_story_and_embedding(prompt)
                 
-                # 2. Sonucu JSON olarak Java'ya geri fırlat
+                # Sonucu Java'ya fırlat (embedding dizisi ile birlikte)
                 result_payload = {
                     "event": "STORY_COMPLETED",
                     "storyId": story_id,
-                    "content": generated_text
+                    "content": generated_text,
+                    "embedding": embedding_vector
                 }
                 
                 await producer.send_and_wait('story-completed-topic', result_payload)
-                print(f"[{story_id}] ID'li hikaye başarıyla Java'ya geri gönderildi.")
+                print(f"[{story_id}] ID'li hikaye ve 1536 boyutlu vektör Java'ya başarıyla gönderildi.")
                 
     finally:
         await consumer.stop()
