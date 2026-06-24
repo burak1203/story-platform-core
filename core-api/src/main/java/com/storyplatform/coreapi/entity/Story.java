@@ -37,7 +37,7 @@ public class Story {
 
     // JDBC kuryesini kandırmak için veriyi Java'da String olarak tutuyoruz.
     // @ColumnTransformer kalkanı, veritabanına yazılırken "?::vector" komutuyla metni gerçek vektöre çevirecek.
-    @Column(columnDefinition = "vector(1536)")
+    @Column(columnDefinition = "vector(384)")
     @ColumnTransformer(write = "?::vector")
     private String embedding;
 

@@ -1,21 +1,52 @@
 from fastapi import FastAPI
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
+from openai import AsyncOpenAI
+from sentence_transformers import SentenceTransformer
+from dotenv import load_dotenv
 import asyncio
 import json
-import random
+import os
+
+# .env yükle (Artık OpenAI API Key'e ihtiyacımız yok, sadece OpenRouter kalabilir)
+load_dotenv()
 
 app = FastAPI(title="Story AI Worker")
 
-async def generate_mock_story_and_embedding(prompt: str):
-    # 1. Metin Üretimi Simülasyonu
-    await asyncio.sleep(2)
-    story_text = f"Yapay zeka tarafından '{prompt}' temel alınarak üretilmiş destansı bir hikaye..."
+# 1. Hikayeyi yazacak olan OpenRouter istemcisi (Ücretsiz Gemma 4 31B)
+openrouter_client = AsyncOpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=os.getenv("OPENROUTER_API_KEY"),
+)
+
+# 2. ÜCRETSİZ VE YEREL HAFIZA MOTORU (Hugging Face)
+# Kod ilk çalıştığında bu modeli internetten bir kez indirecek, sonra hep lokal çalışacak.
+print("Hugging Face Embedding modeli yerel hafızaya yükleniyor...")
+local_embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+
+async def generate_story_and_embedding(prompt: str):
+    # 1. Gemma 4 ile hikayeyi ücretsiz üret
+    print("Gemma 4 (Free) hikayeyi kurguluyor...")
+    chat_response = await openrouter_client.chat.completions.create(
+        model="google/gemma-4-31b-it:free",
+        messages=[
+            {"role": "system", "content": "Sen yaratıcı, karanlık ve sürükleyici kurgular yazan usta bir yazarsın. Hikayelerini Türkçe olarak, etkileyici bir dille yaz."},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.8,
+        max_tokens=1500
+    )
+    story_text = chat_response.choices[0].message.content
+
+    # 2. TAMAMEN BEDAVA VE YEREL EMBEDDING ÜRETİMİ
+    print("Hikaye yerel Hugging Face modeliyle vektöre çevriliyor...")
+    # encode() fonksiyonu senkron çalıştığı için asyncio thread'inde koşturuyoruz ki sistem kasılmasın
+    loop = asyncio.get_event_loop()
+    embedding_vector = await loop.run_in_executor(
+        None, 
+        lambda: local_embedding_model.encode(story_text).tolist()
+    )
     
-    # 2. Vektör (Embedding) Simülasyonu (OpenAI text-embedding-3-small standardı: 1536 boyut)
-    # Gerçek yapay zeka hafızası tam olarak böyle sayılardan oluşur.
-    mock_embedding = [random.uniform(-1.0, 1.0) for _ in range(1536)]
-    
-    return story_text, mock_embedding
+    return story_text, embedding_vector
 
 async def consume_messages():
     consumer = AIOKafkaConsumer(
@@ -31,7 +62,7 @@ async def consume_messages():
     
     await consumer.start()
     await producer.start()
-    print("🎧 AI Worker dinliyor ve vektör üretmeye hazır...")
+    print("🎧 AI Worker (Gemma 4 & Local Embedding) dinliyor...")
     
     try:
         async for msg in consumer:
@@ -41,21 +72,22 @@ async def consume_messages():
             if event == 'GENERATE_STORY':
                 story_id = task_data.get('storyId')
                 prompt = task_data.get('prompt')
-                print(f"[{story_id}] ID'li hikaye için metin ve hafıza (vektör) üretiliyor...")
+                print(f"\n[{story_id}] ID'li görev alındı. Prompt: {prompt}")
                 
-                # LLM'den metni ve vektörü al
-                generated_text, embedding_vector = await generate_mock_story_and_embedding(prompt)
-                
-                # Sonucu Java'ya fırlat (embedding dizisi ile birlikte)
-                result_payload = {
-                    "event": "STORY_COMPLETED",
-                    "storyId": story_id,
-                    "content": generated_text,
-                    "embedding": embedding_vector
-                }
-                
-                await producer.send_and_wait('story-completed-topic', result_payload)
-                print(f"[{story_id}] ID'li hikaye ve 1536 boyutlu vektör Java'ya başarıyla gönderildi.")
+                try:
+                    generated_text, embedding_vector = await generate_story_and_embedding(prompt)
+                    
+                    result_payload = {
+                        "event": "STORY_COMPLETED",
+                        "storyId": story_id,
+                        "content": generated_text,
+                        "embedding": embedding_vector
+                    }
+                    
+                    await producer.send_and_wait('story-completed-topic', result_payload)
+                    print(f"[{story_id}] Hikaye ve yerel vektör Java'ya başarıyla teslim edildi.")
+                except Exception as e:
+                    print(f"HATA: Yapay zeka işlemi başarısız oldu - {e}")
                 
     finally:
         await consumer.stop()

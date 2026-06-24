@@ -3,6 +3,7 @@ core-api/target/
 *.class
 
 # Python & FastAPI
+ai-worker/.env
 ai-worker/venv/
 ai-worker/__pycache__/
 *.pyc
