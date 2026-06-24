@@ -63,4 +63,9 @@ public class Story {
 
     @OneToMany(mappedBy = "story", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<Item> items;
+
+    @Column(columnDefinition = "TEXT")
+    private String currentSummary;
+    // Mevcut veritabanı kayıtlarında hata vermemesi için int yerine Integer (nullable) kullanıyoruz
+    private Integer actionCount;
 }

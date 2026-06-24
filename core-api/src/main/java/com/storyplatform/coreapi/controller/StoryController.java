@@ -28,7 +28,16 @@ public class StoryController {
         List<Story> results = storyService.searchSimilarStories(userId, query);
         return ResponseEntity.ok(results);
     }
+
+    @PostMapping("/{storyId}/continue")
+    public ResponseEntity<Story> continueStory(
+            @PathVariable Long storyId,
+            @RequestBody StoryContinueRequest request) {
+        Story story = storyService.continueStory(request.userId(), storyId, request.userAction());
+        return ResponseEntity.ok(story);
+    }
 }
 
 // Frontend'den beklediğimiz JSON veri sözleşmesi
 record StoryRequest(Long userId, String title, String prompt) {}
+record StoryContinueRequest(Long userId, String userAction) {}

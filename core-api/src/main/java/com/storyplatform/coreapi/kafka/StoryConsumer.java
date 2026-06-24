@@ -19,63 +19,70 @@ public class StoryConsumer {
     private final CharacterRepository characterRepository;
     private final LocationRepository locationRepository;
     private final ItemRepository itemRepository;
+    private final StoryTaskProducer storyTaskProducer; // Python'a özetleme işi atmak için eklendi
 
     @KafkaListener(topics = "story-completed-topic", groupId = "core-api-group")
     @SuppressWarnings("unchecked")
     public void consumeStoryResult(Map<String, Object> payload) {
+        String event = (String) payload.get("event");
         Long storyId = Long.valueOf(payload.get("storyId").toString());
-        String content = (String) payload.get("content");
-        String embedding = payload.get("embedding").toString();
 
         Story story = storyRepository.findById(storyId)
                 .orElseThrow(() -> new RuntimeException("Hikaye bulunamadı"));
+
+        // Eğer gelen mesaj bir özetleme sonucuysa sadece özeti güncelleyip çıkıyoruz
+        if ("STORY_SUMMARIZED".equals(event)) {
+            String summary = (String) payload.get("summary");
+            story.setCurrentSummary(summary);
+            storyRepository.save(story);
+            System.out.println("Hikaye " + storyId + " için Dinamik Özet arka planda güncellendi.");
+            return;
+        }
+
+        // --- NORMAL HİKAYE ÜRETİM VEYA DEVAM İŞLEMİ ---
+        String content = (String) payload.get("content");
+        String embedding = payload.get("embedding").toString();
 
         story.setContent(content);
         story.setEmbedding(embedding);
         story.setStatus("COMPLETED");
 
-        // Önce hikayeyi temel verileriyle güncelle
+        // Hamle sayısını artır (Null kontrolü ile)
+        int currentCount = story.getActionCount() == null ? 0 : story.getActionCount();
+        story.setActionCount(currentCount + 1);
+
         Story savedStory = storyRepository.save(story);
 
-        // 1. Karakterleri Kaydet
+        // Karakterleri, Mekanları ve Nesneleri Kaydet (Önceki yazdığımız kodun aynısı)
         List<Map<String, String>> charactersData = (List<Map<String, String>>) payload.get("characters");
         if (charactersData != null) {
-            charactersData.forEach(c -> {
-                Character character = Character.builder()
-                        .name(c.get("name"))
-                        .description(c.get("description"))
-                        .story(savedStory)
-                        .build();
-                characterRepository.save(character);
-            });
+            charactersData.forEach(c -> characterRepository.save(Character.builder()
+                    .name(c.get("name")).description(c.get("description")).story(savedStory).build()));
         }
 
-        // 2. Mekanları Kaydet
         List<Map<String, String>> locationsData = (List<Map<String, String>>) payload.get("locations");
         if (locationsData != null) {
-            locationsData.forEach(l -> {
-                Location location = Location.builder()
-                        .name(l.get("name"))
-                        .description(l.get("description"))
-                        .story(savedStory)
-                        .build();
-                locationRepository.save(location);
-            });
+            locationsData.forEach(l -> locationRepository.save(Location.builder()
+                    .name(l.get("name")).description(l.get("description")).story(savedStory).build()));
         }
 
-        // 3. Nesneleri Kaydet
         List<Map<String, String>> itemsData = (List<Map<String, String>>) payload.get("items");
         if (itemsData != null) {
-            itemsData.forEach(i -> {
-                Item item = Item.builder()
-                        .name(i.get("name"))
-                        .description(i.get("description"))
-                        .story(savedStory)
-                        .build();
-                itemRepository.save(item);
-            });
+            itemsData.forEach(i -> itemRepository.save(Item.builder()
+                    .name(i.get("name")).description(i.get("description")).story(savedStory).build()));
         }
 
-        System.out.println("Hikaye " + storyId + " ve tüm ilişkili alt elementleri (Karakter/Mekan/Nesne) başarıyla kaydedildi.");
+        System.out.println("Hikaye " + storyId + " güncellendi. (Hamle Sayısı: " + savedStory.getActionCount() + ")");
+
+        // ÖZETLEME TETİKLEYİCİSİ: Her 3 hamlede bir asenkron özet görevi yolla
+        if (savedStory.getActionCount() % 3 == 0) {
+            System.out.println("Hikaye " + storyId + " uzadı. Arka planda özetleme motoru tetikleniyor...");
+            Map<String, Object> summarizeTask = Map.of(
+                    "event", "SUMMARIZE_STORY",
+                    "storyId", savedStory.getId(),
+                    "content", savedStory.getContent()
+            );
+            storyTaskProducer.sendTaskToPython(summarizeTask);
+        }
     }
 }

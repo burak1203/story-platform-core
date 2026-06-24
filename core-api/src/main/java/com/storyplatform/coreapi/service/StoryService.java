@@ -4,6 +4,8 @@ import org.springframework.web.client.RestTemplate;
 import org.springframework.http.ResponseEntity;
 import java.util.List;
 import java.util.Map;
+import java.util.HashMap;
+import java.util.stream.Collectors;
 import com.storyplatform.coreapi.entity.Story;
 import com.storyplatform.coreapi.entity.User;
 import com.storyplatform.coreapi.repository.StoryRepository;
@@ -11,6 +13,7 @@ import com.storyplatform.coreapi.repository.UserRepository;
 import com.storyplatform.coreapi.kafka.StoryTaskProducer;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @RequiredArgsConstructor
@@ -20,7 +23,7 @@ public class StoryService {
     private final UserRepository userRepository;
     private final StoryTaskProducer storyTaskProducer;
 
-    // ESKİ METOT: Hikaye oluşturma ve Kafka'ya yollama (Bunu silmiştik, geri getirdik)
+    // 1. Sıfırdan Hikaye Oluşturma Metodu
     public Story createStoryRequest(Long userId, String title, String prompt) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new RuntimeException("Kullanıcı bulunamadı"));
@@ -42,25 +45,76 @@ public class StoryService {
         );
 
         storyTaskProducer.sendTaskToPython(aiTask);
-
         return savedStory;
     }
 
-    // YENİ METOT: Vektörel Arama
+    // 2. Vektörel Arama Metodu
     public List<Story> searchSimilarStories(Long userId, String searchText) {
-        // 1. Python FastAPI endpoint'ine HTTP isteği at
         RestTemplate restTemplate = new RestTemplate();
         String pythonApiUrl = "http://localhost:8000/api/embed";
 
         Map<String, String> requestBody = Map.of("text", searchText);
         ResponseEntity<Map> response = restTemplate.postForEntity(pythonApiUrl, requestBody, Map.class);
 
-        // 2. Gelen vektörü (List) al ve string formatına çevir
         @SuppressWarnings("unchecked")
         List<Double> vectorList = (List<Double>) response.getBody().get("embedding");
         String vectorString = vectorList.toString();
 
-        // 3. Veritabanında kosinüs benzerliği ile en yakın 3 hikayeyi getir
         return storyRepository.findSimilarStories(userId, vectorString, 3);
+    }
+
+    // 3. YENİ METOT: Hafıza Enjeksiyonlu (RAG) Hikayeye Devam Etme
+    @Transactional(readOnly = true)
+    public Story continueStory(Long userId, Long storyId, String userAction) {
+        // 1. Hikaye ve Kullanıcı Doğrulaması
+        Story story = storyRepository.findById(storyId)
+                .orElseThrow(() -> new RuntimeException("Hikaye bulunamadı"));
+
+        if (!story.getUser().getId().equals(userId)) {
+            throw new RuntimeException("Bu hikayeye müdahale etme yetkiniz yok.");
+        }
+
+        // 2. Alt Elementleri Çek ve Formatla (Sadece isim ve açıklama kısımlarını alıyoruz)
+        List<Map<String, String>> characterList = story.getCharacters().stream()
+                .map(c -> Map.of("name", c.getName(), "description", c.getDescription()))
+                .collect(Collectors.toList());
+
+        List<Map<String, String>> locationList = story.getLocations().stream()
+                .map(l -> Map.of("name", l.getName(), "description", l.getDescription()))
+                .collect(Collectors.toList());
+
+        List<Map<String, String>> itemList = story.getItems().stream()
+                .map(i -> Map.of("name", i.getName(), "description", i.getDescription()))
+                .collect(Collectors.toList());
+
+        // 3. RAG Bağlamını (Context) Oluştur
+        Map<String, Object> context = new HashMap<>();
+        context.put("previousContent", story.getContent());
+        context.put("characters", characterList);
+        context.put("locations", locationList);
+        context.put("items", itemList);
+
+        if (story.getCurrentSummary() != null && !story.getCurrentSummary().trim().isEmpty()) {
+            context.put("storySoFar", story.getCurrentSummary());
+        }
+
+        context.put("characters", characterList);
+        context.put("locations", locationList);
+        context.put("items", itemList);
+
+        // 4. Kafka'ya Gönderilecek "Zenginleştirilmiş" Ana Yükü Hazırla
+        Map<String, Object> aiTask = Map.of(
+                "event", "CONTINUE_STORY",
+                "storyId", story.getId(),
+                "userId", story.getUser().getId(),
+                "userAction", userAction,
+                "context", context
+        );
+
+        // 5. Python'a Fırlat
+        storyTaskProducer.sendTaskToPython(aiTask);
+
+        // İsteğin alındığını dönüyoruz (Asıl güncelleme asenkron çalışacak)
+        return story;
     }
 }
