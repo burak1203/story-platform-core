@@ -3,6 +3,7 @@ from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from openai import AsyncOpenAI
 from sentence_transformers import SentenceTransformer
 from dotenv import load_dotenv
+from pydantic import BaseModel
 import asyncio
 import json
 import os
@@ -52,6 +53,7 @@ async def consume_messages():
     consumer = AIOKafkaConsumer(
         'story-tasks-topic',
         bootstrap_servers='localhost:9092',
+        group_id='ai-worker-group', # Consumer Group ID ekledik, yoksa kafka --workers 4 ile çalışırken her worker tek tek aynı mesajı alıyor ve işliyor
         value_deserializer=lambda m: json.loads(m.decode('utf-8'))
     )
     
@@ -96,3 +98,16 @@ async def consume_messages():
 @app.on_event("startup")
 async def startup_event():
     asyncio.create_task(consume_messages())
+
+class SearchQuery(BaseModel):
+    text: str
+
+@app.post("/api/embed")
+async def get_embedding_for_search(query: SearchQuery):
+    # Gelen arama metnini anında yerel modelle vektöre çevirir (Senkron/HTTP)
+    loop = asyncio.get_event_loop()
+    embedding_vector = await loop.run_in_executor(
+        None, 
+        lambda: local_embedding_model.encode(query.text).tolist()
+    )
+    return {"embedding": embedding_vector}
