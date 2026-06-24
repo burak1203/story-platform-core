@@ -25,29 +25,45 @@ print("Hugging Face Embedding modeli yerel hafızaya yükleniyor...")
 local_embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
 
 async def generate_story_and_embedding(prompt: str):
-    # 1. Gemma 4 ile hikayeyi ücretsiz üret
-    print("Gemma 4 (Free) hikayeyi kurguluyor...")
+    print("Gemma 4 (Free) hikayeyi kurguluyor ve elementleri ayıklıyor...")
+    
+    system_instruction = (
+        "Sen usta bir yazarsın. Gelen talebe göre Türkçe bir hikaye yazmalı ve hikayedeki "
+        "en önemli karakterleri, mekanları ve nesneleri ayıklamalısın. "
+        "Cevabını KESİNLİKLE başka hiçbir açıklama metni eklemeden, doğrudan şu geçerli JSON formatında dönmelisin:\n"
+        "{\n"
+        '  "content": "Yazdığın hikaye metni buraya...",\n'
+        '  "characters": [{"name": "Karakter Adı", "description": "Hikayedeki rolü ve kısa açıklaması"}],\n'
+        '  "locations": [{"name": "Mekan Adı", "description": "Kısa açıklama"}],\n'
+        '  "items": [{"name": "Nesne Adı", "description": "Önemli nesne açıklaması"}]\n'
+        "}"
+    )
+
     chat_response = await openrouter_client.chat.completions.create(
         model="google/gemma-4-31b-it:free",
         messages=[
-            {"role": "system", "content": "Sen yaratıcı, karanlık ve sürükleyici kurgular yazan usta bir yazarsın. Hikayelerini Türkçe olarak, etkileyici bir dille yaz."},
+            {"role": "system", "content": system_instruction},
             {"role": "user", "content": prompt}
         ],
-        temperature=0.8,
-        max_tokens=1500
+        temperature=0.7,
+        max_tokens=2000
     )
-    story_text = chat_response.choices[0].message.content
+    
+    raw_output = chat_response.choices[0].message.content
+    if raw_output.startswith("```json"):
+        raw_output = raw_output.strip("```json").strip("```").strip()
+        
+    parsed_json = json.loads(raw_output)
+    story_text = parsed_json.get("content", "")
 
-    # 2. TAMAMEN BEDAVA VE YEREL EMBEDDING ÜRETİMİ
     print("Hikaye yerel Hugging Face modeliyle vektöre çevriliyor...")
-    # encode() fonksiyonu senkron çalıştığı için asyncio thread'inde koşturuyoruz ki sistem kasılmasın
     loop = asyncio.get_event_loop()
     embedding_vector = await loop.run_in_executor(
         None, 
         lambda: local_embedding_model.encode(story_text).tolist()
     )
     
-    return story_text, embedding_vector
+    return parsed_json, embedding_vector
 
 async def consume_messages():
     consumer = AIOKafkaConsumer(
@@ -77,13 +93,16 @@ async def consume_messages():
                 print(f"\n[{story_id}] ID'li görev alındı. Prompt: {prompt}")
                 
                 try:
-                    generated_text, embedding_vector = await generate_story_and_embedding(prompt)
+                    parsed_json, embedding_vector = await generate_story_and_embedding(prompt)
                     
                     result_payload = {
                         "event": "STORY_COMPLETED",
                         "storyId": story_id,
-                        "content": generated_text,
-                        "embedding": embedding_vector
+                        "content": parsed_json.get("content"),
+                        "embedding": embedding_vector,
+                        "characters": parsed_json.get("characters", []),
+                        "locations": parsed_json.get("locations", []),
+                        "items": parsed_json.get("items", [])
                     }
                     
                     await producer.send_and_wait('story-completed-topic', result_payload)

@@ -8,6 +8,7 @@ import org.hibernate.type.SqlTypes;
 import org.hibernate.annotations.ColumnTransformer;
 import org.hibernate.annotations.DynamicInsert;
 import com.pgvector.PGvector;
+import java.util.List;
 
 @Entity
 @Table(name = "stories")
@@ -53,4 +54,13 @@ public class Story {
     protected void onCreate() {
         createdAt = LocalDateTime.now();
     }
+
+    @OneToMany(mappedBy = "story", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<Character> characters;
+
+    @OneToMany(mappedBy = "story", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<Location> locations;
+
+    @OneToMany(mappedBy = "story", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<Item> items;
 }

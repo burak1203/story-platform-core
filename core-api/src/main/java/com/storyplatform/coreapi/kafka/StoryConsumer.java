@@ -1,50 +1,81 @@
 package com.storyplatform.coreapi.kafka;
 
 import com.storyplatform.coreapi.entity.Story;
-import com.storyplatform.coreapi.repository.StoryRepository;
+import com.storyplatform.coreapi.entity.Character;
+import com.storyplatform.coreapi.entity.Location;
+import com.storyplatform.coreapi.entity.Item;
+import com.storyplatform.coreapi.repository.*;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.stereotype.Component;
 import java.util.List;
 import java.util.Map;
-import com.pgvector.PGvector;
 
-@Service
+@Component
 @RequiredArgsConstructor
-@Slf4j
 public class StoryConsumer {
 
     private final StoryRepository storyRepository;
+    private final CharacterRepository characterRepository;
+    private final LocationRepository locationRepository;
+    private final ItemRepository itemRepository;
 
-    @KafkaListener(topics = "story-completed-topic", groupId = "story-platform-group")
-    @Transactional
-    public void consumeCompletedStory(Map<String, Object> payload) {
-        log.info("Python'dan tamamlanmış hikaye geldi, ID: {}", payload.get("storyId"));
+    @KafkaListener(topics = "story-completed-topic", groupId = "core-api-group")
+    @SuppressWarnings("unchecked")
+    public void consumeStoryResult(Map<String, Object> payload) {
+        Long storyId = Long.valueOf(payload.get("storyId").toString());
+        String content = (String) payload.get("content");
+        String embedding = payload.get("embedding").toString();
 
-        String event = (String) payload.get("event");
-        if ("STORY_COMPLETED".equals(event)) {
-            Long storyId = ((Number) payload.get("storyId")).longValue();
-            String content = (String) payload.get("content");
+        Story story = storyRepository.findById(storyId)
+                .orElseThrow(() -> new RuntimeException("Hikaye bulunamadı"));
 
-            // 1. Python'dan gelen sayı listesini al
-            List<Double> embeddingList = (List<Double>) payload.get("embedding");
+        story.setContent(content);
+        story.setEmbedding(embedding);
+        story.setStatus("COMPLETED");
 
-            Story story = storyRepository.findById(storyId)
-                    .orElseThrow(() -> new RuntimeException("Hikaye bulunamadı: " + storyId));
+        // Önce hikayeyi temel verileriyle güncelle
+        Story savedStory = storyRepository.save(story);
 
-            story.setContent(content);
-            story.setStatus("COMPLETED");
-
-            // 2. Listeyi doğrudan "[0.12, 0.45...]" formatında standart bir metne çevirip kaydet
-            if (embeddingList != null) {
-                story.setEmbedding(embeddingList.toString());
-            }
-
-            storyRepository.save(story);
-
-            log.info("Hikaye {} veritabanına metni ve vektör hafızasıyla (Embedding) başarıyla kaydedildi.", storyId);
+        // 1. Karakterleri Kaydet
+        List<Map<String, String>> charactersData = (List<Map<String, String>>) payload.get("characters");
+        if (charactersData != null) {
+            charactersData.forEach(c -> {
+                Character character = Character.builder()
+                        .name(c.get("name"))
+                        .description(c.get("description"))
+                        .story(savedStory)
+                        .build();
+                characterRepository.save(character);
+            });
         }
+
+        // 2. Mekanları Kaydet
+        List<Map<String, String>> locationsData = (List<Map<String, String>>) payload.get("locations");
+        if (locationsData != null) {
+            locationsData.forEach(l -> {
+                Location location = Location.builder()
+                        .name(l.get("name"))
+                        .description(l.get("description"))
+                        .story(savedStory)
+                        .build();
+                locationRepository.save(location);
+            });
+        }
+
+        // 3. Nesneleri Kaydet
+        List<Map<String, String>> itemsData = (List<Map<String, String>>) payload.get("items");
+        if (itemsData != null) {
+            itemsData.forEach(i -> {
+                Item item = Item.builder()
+                        .name(i.get("name"))
+                        .description(i.get("description"))
+                        .story(savedStory)
+                        .build();
+                itemRepository.save(item);
+            });
+        }
+
+        System.out.println("Hikaye " + storyId + " ve tüm ilişkili alt elementleri (Karakter/Mekan/Nesne) başarıyla kaydedildi.");
     }
 }
