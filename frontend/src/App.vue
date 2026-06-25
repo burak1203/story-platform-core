@@ -1,153 +1,174 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onUnmounted } from 'vue'
+import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useStoryStore } from './stores/storyStore'
+import { marked } from 'marked'
 
 const store = useStoryStore()
-const userInput = ref('')
+const userAction = ref('')
+const scrollContainer = ref<HTMLElement | null>(null)
 
-// Enter tuşuna veya butona basıldığında çalışacak fonksiyon
-const handleAction = async () => {
-  if (!userInput.value.trim() || store.isLoading) return
+// Test için ID'si 5 olan hikayeyi doğrudan yüklüyoruz
+const ACTIVE_STORY_ID = 5
 
-  const input = userInput.value
-  userInput.value = '' // İstek atılırken inputu hemen temizle
+onMounted(() => {
+  store.fetchStory(ACTIVE_STORY_ID)
+})
 
-  if (!store.storyId) {
-    // Hikaye ID'si yoksa, bu girilen ilk prompt'tur
-    await store.startNewStory(input)
-  } else {
-    // Hikaye zaten varsa, yeni hamle olarak devam ettir
-    await store.continueStory(input)
-  }
+onUnmounted(() => {
+  store.disconnectStream()
+})
+
+// Markdown içeriğini HTML'e çeviriyoruz
+const renderedContent = computed(() => {
+  if (!store.story?.content) return ''
+  return marked.parse(store.story.content, { breaks: true })
+})
+
+// Hikaye içeriği değiştiğinde otomatik en aşağı kaydırma
+watch(
+  () => store.story?.content,
+  async () => {
+    await nextTick()
+    if (scrollContainer.value) {
+      scrollContainer.value.scrollTop = scrollContainer.value.scrollHeight
+    }
+  },
+)
+
+const submitAction = async () => {
+  if (!userAction.value.trim() || store.isLoading) return
+
+  const actionText = userAction.value
+  userAction.value = '' // Inputu hemen temizle
+
+  await store.continueStory(ACTIVE_STORY_ID, actionText)
 }
 </script>
 
 <template>
-  <div class="min-h-screen bg-gray-900 text-gray-100 flex overflow-hidden font-sans">
-    <aside class="w-1/4 bg-gray-800 border-r border-gray-700 flex flex-col">
-      <div class="p-4 border-b border-gray-700">
-        <h2 class="text-sm font-bold text-gray-400 uppercase tracking-wider">Evren Hafızası</h2>
-      </div>
-      <div
-        class="p-4 flex-1 overflow-y-auto text-sm text-gray-300 leading-relaxed whitespace-pre-wrap"
-      >
-        <span v-if="store.summary">{{ store.summary }}</span>
-        <span v-else class="italic text-gray-500"
-          >Hikaye ilerledikçe evren özeti (Running Summary) burada oluşacak...</span
+  <div class="h-screen w-full bg-slate-900 text-gray-200 flex overflow-hidden font-sans">
+    <!-- SOL PANEL: Meta ve Özet -->
+    <aside class="w-1/4 bg-slate-800 border-r border-slate-700 p-6 flex flex-col">
+      <h1 class="text-2xl font-bold text-amber-500 mb-2">
+        {{ store.story?.title || 'Yükleniyor...' }}
+      </h1>
+      <div class="flex items-center gap-2 mb-8 text-sm text-slate-400">
+        <span class="bg-slate-700 px-2 py-1 rounded"
+          >Durum: {{ store.story?.status || '...' }}</span
         >
+        <span class="bg-slate-700 px-2 py-1 rounded"
+          >Hamle: {{ store.story?.actionCount || 0 }}</span
+        >
+      </div>
+
+      <div class="flex-1 overflow-y-auto pr-2">
+        <h2 class="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-3">
+          Şu Ana Kadarki Özet
+        </h2>
+        <p
+          class="text-sm leading-relaxed text-slate-300 bg-slate-800/50 p-4 rounded-lg border border-slate-700/50"
+        >
+          {{ store.story?.currentSummary || 'Henüz bir özet oluşturulmadı (3 hamle gerekiyor).' }}
+        </p>
       </div>
     </aside>
 
-    <main class="w-2/4 flex flex-col relative">
+    <!-- ORTA PANEL: Hikaye Akışı ve Input -->
+    <main class="w-2/4 flex flex-col relative bg-slate-950">
       <div
-        class="p-4 border-b border-gray-800 bg-gray-900/90 backdrop-blur z-10 flex justify-between items-center"
+        v-if="store.error"
+        class="bg-red-900/50 border border-red-500 text-red-200 p-4 mx-10 mb-4 rounded-lg"
       >
-        <h1 class="text-lg font-semibold text-white">
-          {{ store.storyId ? `Aktif Kurgu (ID: ${store.storyId})` : 'Yeni Kurgu' }}
-        </h1>
-        <span v-if="store.isLoading" class="text-xs text-indigo-400 animate-pulse">
-          Yapay Zeka İşliyor...
-        </span>
+        ⚠️ {{ store.error }}
       </div>
+      <!-- Hikaye Metni -->
+      <div
+        ref="scrollContainer"
+        class="flex-1 overflow-y-auto p-10 pb-32 prose prose-invert max-w-none prose-p:leading-relaxed prose-p:mb-6 prose-a:text-amber-500"
+        v-html="renderedContent"
+      ></div>
 
-      <div class="flex-1 overflow-y-auto p-8 space-y-6 text-lg leading-relaxed whitespace-pre-wrap">
-        <div v-if="store.content">{{ store.content }}</div>
-        <div v-else-if="!store.isLoading" class="text-gray-500 text-center text-sm mt-10">
-          Hikayeye başlamak için aşağıya ilk eylemini veya ortamı yaz...
-        </div>
-      </div>
-
-      <div class="p-4 bg-gray-900 border-t border-gray-800">
-        <div class="flex gap-2">
+      <!-- Aksiyon Alanı -->
+      <div
+        class="absolute bottom-0 w-full p-6 bg-gradient-to-t from-slate-950 via-slate-950 to-transparent"
+      >
+        <form @submit.prevent="submitAction" class="flex gap-3 max-w-3xl mx-auto">
           <input
-            v-model="userInput"
-            @keyup.enter="handleAction"
-            :disabled="store.isLoading"
+            v-model="userAction"
             type="text"
-            :placeholder="store.storyId ? 'Ne yapacaksın?' : 'Hikayeye nasıl bir giriş yapalım?'"
-            class="flex-1 bg-gray-800 text-white rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 border border-gray-700 disabled:opacity-50"
+            placeholder="Bir sonraki hamleyi yaz (Örn: Kapıyı aç ve içeri gir)..."
+            class="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-5 py-4 text-gray-100 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all shadow-lg"
+            :disabled="store.isLoading"
           />
           <button
-            @click="handleAction"
-            :disabled="store.isLoading || !userInput.trim()"
-            class="bg-indigo-600 hover:bg-indigo-700 px-6 py-3 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            type="submit"
+            class="bg-amber-600 hover:bg-amber-500 text-slate-900 font-bold px-8 py-4 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-lg flex items-center gap-2"
+            :disabled="store.isLoading || !userAction.trim()"
           >
-            {{ store.storyId ? 'Hamle Yap' : 'Başlat' }}
+            <span v-if="store.isLoading">Yazılıyor...</span>
+            <span v-else>Devam Et</span>
           </button>
-        </div>
+        </form>
       </div>
     </main>
 
-    <aside class="w-1/4 bg-gray-800 border-l border-gray-700 flex flex-col">
-      <div class="p-4 border-b border-gray-700">
-        <h2 class="text-sm font-bold text-gray-400 uppercase tracking-wider">Evren Elementleri</h2>
+    <!-- SAĞ PANEL: Lore ve Elementler -->
+    <aside
+      class="w-1/4 bg-slate-800 border-l border-slate-700 p-6 flex flex-col gap-6 overflow-y-auto"
+    >
+      <h2 class="text-lg font-bold text-slate-100 border-b border-slate-700 pb-2">Keşfedilenler</h2>
+
+      <!-- Karakterler -->
+      <div>
+        <h3 class="text-xs uppercase tracking-wider text-amber-500 font-semibold mb-3">
+          Karakterler ({{ store.story?.characters.length || 0 }})
+        </h3>
+        <div class="flex flex-col gap-3">
+          <div
+            v-for="(char, idx) in store.story?.characters"
+            :key="'char-' + idx"
+            class="bg-slate-700/40 p-3 rounded border border-slate-600"
+          >
+            <div class="font-bold text-sm text-slate-200">{{ char.name }}</div>
+            <div class="text-xs text-slate-400 mt-1">{{ char.description }}</div>
+          </div>
+        </div>
       </div>
-      <div class="p-4 flex-1 overflow-y-auto space-y-6">
-        <p
-          v-if="!store.characters.length && !store.locations.length && !store.items.length"
-          class="text-xs text-gray-500 italic text-center mt-5"
-        >
-          Henüz keşfedilen bir element yok.
-        </p>
 
-        <div v-if="store.characters.length > 0">
-          <h3 class="text-xs font-bold text-gray-400 mb-2 border-b border-gray-700 pb-1">
-            KARAKTERLER
-          </h3>
+      <!-- Mekanlar -->
+      <div>
+        <h3 class="text-xs uppercase tracking-wider text-emerald-500 font-semibold mb-3">
+          Mekanlar ({{ store.story?.locations.length || 0 }})
+        </h3>
+        <div class="flex flex-col gap-3">
           <div
-            v-for="(char, index) in store.characters"
-            :key="'char-' + index"
-            class="bg-gray-700/50 p-2 rounded border border-gray-600 mb-2"
+            v-for="(loc, idx) in store.story?.locations"
+            :key="'loc-' + idx"
+            class="bg-slate-700/40 p-3 rounded border border-slate-600"
           >
-            <h4 class="font-medium text-white text-sm">{{ char.name }}</h4>
-            <p class="text-xs text-gray-400">{{ char.description }}</p>
+            <div class="font-bold text-sm text-slate-200">{{ loc.name }}</div>
+            <div class="text-xs text-slate-400 mt-1">{{ loc.description }}</div>
           </div>
         </div>
+      </div>
 
-        <div v-if="store.locations.length > 0">
-          <h3 class="text-xs font-bold text-gray-400 mb-2 border-b border-gray-700 pb-1">
-            MEKANLAR
-          </h3>
+      <!-- Eşyalar -->
+      <div>
+        <h3 class="text-xs uppercase tracking-wider text-cyan-500 font-semibold mb-3">
+          Eşyalar ({{ store.story?.items.length || 0 }})
+        </h3>
+        <div class="flex flex-col gap-3">
           <div
-            v-for="(loc, index) in store.locations"
-            :key="'loc-' + index"
-            class="bg-gray-700/50 p-2 rounded border border-gray-600 mb-2"
+            v-for="(item, idx) in store.story?.items"
+            :key="'item-' + idx"
+            class="bg-slate-700/40 p-3 rounded border border-slate-600"
           >
-            <h4 class="font-medium text-white text-sm">{{ loc.name }}</h4>
-            <p class="text-xs text-gray-400">{{ loc.description }}</p>
-          </div>
-        </div>
-
-        <div v-if="store.items.length > 0">
-          <h3 class="text-xs font-bold text-gray-400 mb-2 border-b border-gray-700 pb-1">
-            EŞYALAR
-          </h3>
-          <div
-            v-for="(item, index) in store.items"
-            :key="'item-' + index"
-            class="bg-gray-700/50 p-2 rounded border border-gray-600 mb-2"
-          >
-            <h4 class="font-medium text-white text-sm">{{ item.name }}</h4>
-            <p class="text-xs text-gray-400">{{ item.description }}</p>
+            <div class="font-bold text-sm text-slate-200">{{ item.name }}</div>
+            <div class="text-xs text-slate-400 mt-1">{{ item.description }}</div>
           </div>
         </div>
       </div>
     </aside>
   </div>
 </template>
-
-<style>
-::-webkit-scrollbar {
-  width: 6px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: #4b5563;
-  border-radius: 4px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #6b7280;
-}
-</style>

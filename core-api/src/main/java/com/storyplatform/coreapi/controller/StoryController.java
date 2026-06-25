@@ -6,15 +6,20 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import com.storyplatform.coreapi.dto.StoryDetailResponse;
+import org.springframework.http.MediaType;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import com.storyplatform.coreapi.service.SseService;
 
 import java.util.List;
 
 @RestController
 @RequestMapping("/api/stories")
 @RequiredArgsConstructor
+@CrossOrigin(origins = "http://localhost:5173")
 public class StoryController {
 
     private final StoryService storyService;
+    private final SseService sseService;
 
     @PostMapping("/generate")
     public ResponseEntity<Story> generateStory(@RequestBody StoryRequest request) {
@@ -41,6 +46,11 @@ public class StoryController {
     @GetMapping("/{storyId}")
     public ResponseEntity<StoryDetailResponse> getStoryDetails(@PathVariable Long storyId) {
         return ResponseEntity.ok(storyService.getStoryDetails(storyId));
+    }
+
+    @GetMapping(value = "/{storyId}/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter streamStory(@PathVariable Long storyId) {
+        return sseService.subscribe(storyId);
     }
 }
 

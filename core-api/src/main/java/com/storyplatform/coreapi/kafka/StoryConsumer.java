@@ -10,6 +10,9 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 import java.util.List;
 import java.util.Map;
+import com.storyplatform.coreapi.service.SseService;
+import com.storyplatform.coreapi.service.StoryService;
+import com.storyplatform.coreapi.dto.StoryDetailResponse;
 
 @Component
 @RequiredArgsConstructor
@@ -20,6 +23,8 @@ public class StoryConsumer {
     private final LocationRepository locationRepository;
     private final ItemRepository itemRepository;
     private final StoryTaskProducer storyTaskProducer; // Python'a özetleme işi atmak için eklendi
+    private final SseService sseService;
+    private final StoryService storyService;
 
     @KafkaListener(topics = "story-completed-topic", groupId = "core-api-group")
     @SuppressWarnings("unchecked")
@@ -73,6 +78,14 @@ public class StoryConsumer {
         }
 
         System.out.println("Hikaye " + storyId + " güncellendi. (Hamle Sayısı: " + savedStory.getActionCount() + ")");
+
+        try {
+            StoryDetailResponse updatedDetails = storyService.getStoryDetails(storyId);
+            sseService.sendStoryUpdate(storyId, updatedDetails);
+            System.out.println("SSE ile Frontend'e canlı güncelleme gönderildi.");
+        } catch (Exception e) {
+            System.err.println("SSE gönderimi başarısız: " + e.getMessage());
+        }
 
         // ÖZETLEME TETİKLEYİCİSİ: Her 3 hamlede bir asenkron özet görevi yolla
         if (savedStory.getActionCount() % 3 == 0) {

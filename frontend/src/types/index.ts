@@ -5,8 +5,11 @@ export interface ElementDto {
 
 export interface StoryDetailResponse {
   id: number
+  title: string
   content: string
-  summary: string
+  status: string
+  currentSummary: string | null
+  actionCount: number
   characters: ElementDto[]
   locations: ElementDto[]
   items: ElementDto[]
