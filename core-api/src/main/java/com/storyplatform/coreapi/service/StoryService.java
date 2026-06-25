@@ -14,6 +14,8 @@ import com.storyplatform.coreapi.kafka.StoryTaskProducer;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.storyplatform.coreapi.dto.ElementDto;
+import com.storyplatform.coreapi.dto.StoryDetailResponse;
 
 @Service
 @RequiredArgsConstructor
@@ -90,9 +92,6 @@ public class StoryService {
         // 3. RAG Bağlamını (Context) Oluştur
         Map<String, Object> context = new HashMap<>();
         context.put("previousContent", story.getContent());
-        context.put("characters", characterList);
-        context.put("locations", locationList);
-        context.put("items", itemList);
 
         if (story.getCurrentSummary() != null && !story.getCurrentSummary().trim().isEmpty()) {
             context.put("storySoFar", story.getCurrentSummary());
@@ -116,5 +115,35 @@ public class StoryService {
 
         // İsteğin alındığını dönüyoruz (Asıl güncelleme asenkron çalışacak)
         return story;
+    }
+
+    @Transactional(readOnly = true)
+    public StoryDetailResponse getStoryDetails(Long storyId) {
+        Story story = storyRepository.findById(storyId)
+                .orElseThrow(() -> new RuntimeException("Hikaye bulunamadı"));
+
+        List<ElementDto> characters = story.getCharacters().stream()
+                .map(c -> new ElementDto(c.getName(), c.getDescription()))
+                .toList();
+
+        List<ElementDto> locations = story.getLocations().stream()
+                .map(l -> new ElementDto(l.getName(), l.getDescription()))
+                .toList();
+
+        List<ElementDto> items = story.getItems().stream()
+                .map(i -> new ElementDto(i.getName(), i.getDescription()))
+                .toList();
+
+        return new StoryDetailResponse(
+                story.getId(),
+                story.getTitle(),
+                story.getContent(),
+                story.getStatus(),
+                story.getCurrentSummary(),
+                story.getActionCount(),
+                characters,
+                locations,
+                items
+        );
     }
 }

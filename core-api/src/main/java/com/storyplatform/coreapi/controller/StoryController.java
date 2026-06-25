@@ -5,6 +5,7 @@ import com.storyplatform.coreapi.service.StoryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import com.storyplatform.coreapi.dto.StoryDetailResponse;
 
 import java.util.List;
 
@@ -35,6 +36,11 @@ public class StoryController {
             @RequestBody StoryContinueRequest request) {
         Story story = storyService.continueStory(request.userId(), storyId, request.userAction());
         return ResponseEntity.ok(story);
+    }
+
+    @GetMapping("/{storyId}")
+    public ResponseEntity<StoryDetailResponse> getStoryDetails(@PathVariable Long storyId) {
+        return ResponseEntity.ok(storyService.getStoryDetails(storyId));
     }
 }
 
