@@ -2,7 +2,7 @@
 
 StoryPlatform is a modern, microservice-based interactive storytelling and RPG engine designed to eliminate the classic LLM context-window limitation. By leveraging a Hybrid RAG (Retrieval-Augmented Generation) architecture, Relational Database Entity Extraction, and an Autonomous Running Summary loop, the system maintains a persistent, infinite-horizon memory of stories, characters, locations, and items.
 
-## 🏗️ System Architecture
+## System Architecture
 
 The project is built as a **Monorepo** comprising two decoupled services communicating asynchronously via **Apache Kafka** and synchronously via **REST APIs**:
 
@@ -19,7 +19,7 @@ The project is built as a **Monorepo** comprising two decoupled services communi
 1. **Core API (Java / Spring Boot 3.x):** The system's backbone. Manages users, core transactional story entities, relational mapping, database updates, and orchestrates the event-driven workflow.
 2. **AI Worker (Python 3.12 / FastAPI):** The computational brain. Handles asynchronous long-form text generation using state-of-the-art Large Language Models (LLMs) via OpenRouter/HuggingFace and real-time synchronous embedding generation.
 
-## ⚡ Key Features & AI Memory Lifecycle
+## Key Features & AI Memory Lifecycle
 
 ### 1. Asynchronous Story Generation Loop
 To maximize throughput and decouple I/O heavy LLM processing times from the web server, story requests are pushed to an Apache Kafka pipeline (`story-tasks-topic`). The Core API frees the user immediately with a `PENDING` status. The AI Worker processes the queue and replies to `story-completed-topic` when the generation finishes.
@@ -63,7 +63,7 @@ docker-compose up -d
 4. Run the `CoreApiApplication.java` entry point.
 
 ### 3. AI Worker Setup
-Set up the isolated virtual environment and install the pinned dependencies:
+1. Set up the isolated virtual environment and install the pinned dependencies:
 ```bash
 cd ai-worker
 python -m venv venv
@@ -75,5 +75,12 @@ python -m venv venv
 source venv/bin/activate
 
 pip install -r requirements.txt
+```
+2. Create a .env file in the ai-worker directory and add your OpenRouter API key
+```bash
+OPENROUTER_API_KEY=your_api_key_here
+```
+3. Run the application
+```bash
 uvicorn main:app --reload --port 8000
 ```
