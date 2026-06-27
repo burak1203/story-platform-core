@@ -12,47 +12,50 @@ import java.util.concurrent.CopyOnWriteArrayList;
 @Service
 public class SseService {
 
-    // Hangi hikayeyi (storyId) hangi istemcilerin (SseEmitter) dinlediğini tutan Thread-Safe harita
-    private final Map<Long, List<SseEmitter>> emitters = new ConcurrentHashMap<>();
+    // KRİTİK: Long yerine String kullanıyoruz ki Kafka'dan gelen Integer/Long tip çakışmaları yaşanmasın
+    private final Map<String, List<SseEmitter>> emitters = new ConcurrentHashMap<>();
 
-    // Frontend'in tünele abone olması için çağrılacak metot
     public SseEmitter subscribe(Long storyId) {
-        // Timeout süresi 10 dakika (600_000 ms)
-        SseEmitter emitter = new SseEmitter(600_000L);
+        String key = String.valueOf(storyId);
+        SseEmitter emitter = new SseEmitter(600_000L); // Zaman aşımı 10 Dakika
 
-        emitters.computeIfAbsent(storyId, k -> new CopyOnWriteArrayList<>()).add(emitter);
+        emitters.computeIfAbsent(key, k -> new CopyOnWriteArrayList<>()).add(emitter);
 
-        // Bağlantı koparsa veya zaman aşımına uğrarsa hafızadan temizle
-        emitter.onCompletion(() -> removeEmitter(storyId, emitter));
-        emitter.onTimeout(() -> removeEmitter(storyId, emitter));
-        emitter.onError((e) -> removeEmitter(storyId, emitter));
+        emitter.onCompletion(() -> removeEmitter(key, emitter));
+        emitter.onTimeout(() -> removeEmitter(key, emitter));
+        emitter.onError((e) -> removeEmitter(key, emitter));
 
+        System.out.println("Tünel açıldı, dinleniyor: HİKAYE ID -> " + key);
         return emitter;
     }
 
-    private void removeEmitter(Long storyId, SseEmitter emitter) {
-        List<SseEmitter> list = emitters.get(storyId);
+    private void removeEmitter(String key, SseEmitter emitter) {
+        List<SseEmitter> list = emitters.get(key);
         if (list != null) {
             list.remove(emitter);
             if (list.isEmpty()) {
-                emitters.remove(storyId);
+                emitters.remove(key);
             }
         }
     }
 
-    // Kafka'dan yanıt geldiğinde JSON'u bu tünelden frontend'e fırlatacak metot
     public void sendStoryUpdate(Long storyId, Object data) {
-        List<SseEmitter> list = emitters.get(storyId);
-        if (list != null) {
+        String key = String.valueOf(storyId);
+        List<SseEmitter> list = emitters.get(key);
+
+        if (list != null && !list.isEmpty()) {
             for (SseEmitter emitter : list) {
                 try {
-                    // STORY_UPDATE isminde bir event gönderiyoruz
+                    // Veriyi Frontend'e fırlat
                     emitter.send(SseEmitter.event().name("STORY_UPDATE").data(data));
+                    System.out.println("BAŞARILI: SSE verisi Frontend'e fırlatıldı! HİKAYE ID -> " + key);
                 } catch (IOException e) {
                     emitter.complete();
-                    removeEmitter(storyId, emitter);
+                    removeEmitter(key, emitter);
                 }
             }
+        } else {
+            System.err.println("DİKKAT: " + key + " ID'li hikaye için açık bir tünel bulunamadı! Frontend tüneli koparmış olabilir.");
         }
     }
 }

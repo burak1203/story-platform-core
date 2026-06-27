@@ -17,4 +17,7 @@ public interface StoryRepository extends JpaRepository<Story, Long> {
     // pgvector ile Kosinüs Benzerliği (Cosine Similarity) Araması
     @Query(value = "SELECT * FROM stories WHERE user_id = :userId ORDER BY embedding <=> CAST(:embedding AS vector) LIMIT :limit", nativeQuery = true)
     List<Story> findSimilarStories(@Param("userId") Long userId, @Param("embedding") String embedding, @Param("limit") int limit);
+
+    // Kullanıcının hikayelerini en yeniden eskiye doğru listelemek için
+    List<Story> findByUserIdOrderByIdDesc(Long userId);
 }

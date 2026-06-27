@@ -13,7 +13,7 @@ load_dotenv()
 
 app = FastAPI(title="Story AI Worker")
 
-# 1. Hikayeyi yazacak olan OpenRouter istemcisi (Ücretsiz Gemma 4 31B)
+# 1. Hikayeyi yazacak olan OpenRouter istemcisi
 openrouter_client = AsyncOpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=os.getenv("OPENROUTER_API_KEY"),
@@ -24,7 +24,7 @@ print("Hugging Face Embedding modeli yerel hafızaya yükleniyor...")
 local_embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
 
 async def generate_story_and_embedding(prompt: str):
-    print("Gemma 4 (Free) hikayeyi kurguluyor ve elementleri ayıklıyor...")
+    print("Model (Free) hikayeyi kurguluyor ve elementleri ayıklıyor...")
     
     system_instruction = (
         "Sen usta bir yazarsın. Gelen talebe göre Türkçe bir hikaye yazmalı ve hikayedeki "
@@ -39,7 +39,7 @@ async def generate_story_and_embedding(prompt: str):
     )
 
     chat_response = await openrouter_client.chat.completions.create(
-        model="google/gemma-4-31b-it:free",
+        model="google/gemma-4-26b-a4b-it:free",
         messages=[
             {"role": "system", "content": system_instruction},
             {"role": "user", "content": prompt}
@@ -73,7 +73,7 @@ async def summarize_story_content(story_content: str):
     )
     
     chat_response = await openrouter_client.chat.completions.create(
-        model="google/gemma-4-31b-it:free",
+        model="google/gemma-4-26b-a4b-it:free",
         messages=[
             {"role": "system", "content": system_instruction},
             {"role": "user", "content": f"Şu hikayeyi özetle:\n\n{story_content}"}
@@ -125,7 +125,7 @@ Eğer metinde yeni bir şey yoksa, o listeleri boş bırak ([]). Bilinen evrende
 """
 
     chat_response = await openrouter_client.chat.completions.create(
-        model="google/gemma-4-31b-it:free",
+        model="google/gemma-4-26b-a4b-it:free",
         messages=[
             {"role": "system", "content": system_instruction},
             {"role": "user", "content": f"Hamlem: {user_action}\nHikayeyi devam ettir ve JSON dön."}
@@ -169,7 +169,7 @@ async def consume_messages():
     
     await consumer.start()
     await producer.start()
-    print("🎧 AI Worker (Gemma 4 & Local Embedding) dinliyor...")
+    print("🎧 AI Worker (Model free & Local Embedding) dinliyor...")
     
     try:
         async for msg in consumer:

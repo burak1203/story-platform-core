@@ -9,6 +9,8 @@ import com.storyplatform.coreapi.dto.StoryDetailResponse;
 import org.springframework.http.MediaType;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import com.storyplatform.coreapi.service.SseService;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import com.storyplatform.coreapi.entity.User;
 
 import java.util.List;
 
@@ -21,39 +23,61 @@ public class StoryController {
     private final StoryService storyService;
     private final SseService sseService;
 
-    @PostMapping("/generate")
-    public ResponseEntity<Story> generateStory(@RequestBody StoryRequest request) {
-        Story story = storyService.createStoryRequest(request.userId(), request.title(), request.prompt());
-        return ResponseEntity.ok(story);
+    @GetMapping("/my-stories")
+    public ResponseEntity<List<StoryDetailResponse>> getMyStories(@AuthenticationPrincipal User user) {
+        return ResponseEntity.ok(storyService.getMyStories(user));
+    }
+
+    @PostMapping
+    public ResponseEntity<StoryDetailResponse> createStory(
+            @RequestBody CreateStoryRequest request,
+            @AuthenticationPrincipal User user) {
+        return ResponseEntity.ok(storyService.createStory(user, request));
     }
 
     @GetMapping("/search")
     public ResponseEntity<List<Story>> searchStories(
-            @RequestParam Long userId,
+            @AuthenticationPrincipal User user,
             @RequestParam String query) {
-        List<Story> results = storyService.searchSimilarStories(userId, query);
+        List<Story> results = storyService.searchSimilarStories(user.getId(), query);
         return ResponseEntity.ok(results);
     }
 
     @PostMapping("/{storyId}/continue")
-    public ResponseEntity<Story> continueStory(
+    public ResponseEntity<Void> continueStory(
             @PathVariable Long storyId,
-            @RequestBody StoryContinueRequest request) {
-        Story story = storyService.continueStory(request.userId(), storyId, request.userAction());
-        return ResponseEntity.ok(story);
+            @RequestBody StoryContinueRequest request,
+            @AuthenticationPrincipal User user) {
+
+        // Doğrudan ID ve action gönderiyoruz, Service katmanı güvenliği kontrol ediyor
+        storyService.continueStory(user.getId(), storyId, request.userAction());
+        return ResponseEntity.ok().build();
     }
 
     @GetMapping("/{storyId}")
-    public ResponseEntity<StoryDetailResponse> getStoryDetails(@PathVariable Long storyId) {
-        return ResponseEntity.ok(storyService.getStoryDetails(storyId));
+    public ResponseEntity<StoryDetailResponse> getStory(
+            @PathVariable Long storyId,
+            @AuthenticationPrincipal User user) {
+        return ResponseEntity.ok(storyService.getStorySafely(storyId, user));
     }
 
     @GetMapping(value = "/{storyId}/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter streamStory(@PathVariable Long storyId) {
+        // Not: JwtAuthenticationFilter içindeki '?token=' kontrolü sayesinde bu uç artık güvenli.
         return sseService.subscribe(storyId);
     }
-}
 
-// Frontend'den beklediğimiz JSON veri sözleşmesi
-record StoryRequest(Long userId, String title, String prompt) {}
-record StoryContinueRequest(Long userId, String userAction) {}
+    @DeleteMapping("/{storyId}")
+    public ResponseEntity<Void> deleteStory(
+            @PathVariable Long storyId,
+            @AuthenticationPrincipal User user) {
+        storyService.deleteStory(storyId, user);
+        return ResponseEntity.ok().build();
+    }
+
+    // --- FRONTEND İÇİN GÜNCELLENMİŞ JSON SÖZLEŞMELERİ ---
+    // userId parametreleri kaldırıldı, güvenlik Spring Security'e devredildi.
+
+    public record CreateStoryRequest(String title, String startingPrompt) {}
+    public record StoryContinueRequest(String userAction) {}
+}

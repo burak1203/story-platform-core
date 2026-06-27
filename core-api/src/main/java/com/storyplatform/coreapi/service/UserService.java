@@ -22,7 +22,7 @@ public class UserService {
             throw new RuntimeException("Bu e-posta adresi zaten kullanımda!");
         }
 
-        user.setRole("ROLE_USER");
+        user.setRole(User.Role.USER);
 
         // 2. Veritabanına Kaydet
         User savedUser = userRepository.save(user);

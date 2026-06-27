@@ -1,19 +1,49 @@
 import { defineStore } from 'pinia'
 import axios from 'axios'
-import type { StoryDetailResponse } from '../types'
+import type { StoryDetailResponse, CreateStoryRequest } from '../types'
 
 const API_URL = 'http://localhost:8080/api/stories'
 
 export const useStoryStore = defineStore('story', {
   state: () => ({
     story: null as StoryDetailResponse | null,
+    myStories: [] as StoryDetailResponse[], // YENİ: Kullanıcının hikayeleri
     isLoading: false,
     error: null as string | null,
     eventSource: null as EventSource | null,
-    watchdogTimer: null as number | null, // Kara deliği engellemek için zamanlayıcı
+    watchdogTimer: null as number | null,
   }),
 
   actions: {
+    // dashboard'da gösterilecek tüm hikayeleri getirir
+    async fetchMyStories() {
+      this.isLoading = true
+      this.error = null
+      try {
+        const response = await axios.get<StoryDetailResponse[]>(`${API_URL}/my-stories`)
+        this.myStories = response.data
+      } catch (err: any) {
+        this.error = err.message || 'Hikayeler yüklenemedi.'
+      } finally {
+        this.isLoading = false
+      }
+    },
+
+    // Sıfırdan hikaye oluşturur ve yönlendirme için döner
+    async createStory(payload: CreateStoryRequest) {
+      this.isLoading = true
+      this.error = null
+      try {
+        const response = await axios.post<StoryDetailResponse>(API_URL, payload)
+        return response.data
+      } catch (err: any) {
+        this.error = err.message || 'Hikaye oluşturulamadı.'
+        throw err
+      } finally {
+        this.isLoading = false
+      }
+    },
+
     async fetchStory(storyId: number) {
       this.isLoading = true
       this.error = null
@@ -21,33 +51,54 @@ export const useStoryStore = defineStore('story', {
         const response = await axios.get<StoryDetailResponse>(`${API_URL}/${storyId}`)
         this.story = response.data
         this.connectToStream(storyId)
+
+        // butonları kilitli tut ve Watchdog'u başlat.
+        if (this.story.status === 'PENDING') {
+          this.isLoading = true
+          this.startWatchdog()
+        } else {
+          this.isLoading = false
+        }
       } catch (err: any) {
         this.error = err.message || 'Hikaye yüklenemedi.'
+        this.isLoading = false
+      }
+    },
+
+    async deleteStory(storyId: number) {
+      this.isLoading = true
+      this.error = null
+      try {
+        await axios.delete(`${API_URL}/${storyId}`)
+        // Silme başarılıysa o hikayeyi ekrandaki listeden anında uçur
+        this.myStories = this.myStories.filter((s) => s.id !== storyId)
+      } catch (err: any) {
+        this.error = err.message || 'Hikaye silinemedi.'
       } finally {
         this.isLoading = false
       }
     },
 
     connectToStream(storyId: number) {
-      this.disconnectStream() // Önce eskisini temizle (Zombileri engelle)
+      this.disconnectStream()
 
-      this.eventSource = new EventSource(`${API_URL}/${storyId}/stream`)
+      // KRİTİK DEĞİŞİKLİK: SSE tüneline JWT Token'ı URL üzerinden veriyoruz
+      const token = localStorage.getItem('token')
+      this.eventSource = new EventSource(`${API_URL}/${storyId}/stream?token=${token}`)
 
       this.eventSource.addEventListener('STORY_UPDATE', (event) => {
         console.log("Backend'den güncel hikaye canlı olarak geldi!")
         this.story = JSON.parse(event.data)
-        this.stopWatchdog() // Veri geldiyse zamanlayıcıyı iptal et
+        this.stopWatchdog()
         this.isLoading = false
       })
 
       this.eventSource.onerror = (err) => {
         console.error('SSE Bağlantı Hatası veya Tünel Koptu.')
-        // Sonsuz döngüye girmemesi için tüneli kapatıyoruz
         this.disconnectStream()
       }
     },
 
-    // YENİ: Uygulama kapanırken veya bileşen ölürken çağrılacak
     disconnectStream() {
       if (this.eventSource) {
         this.eventSource.close()
@@ -59,12 +110,11 @@ export const useStoryStore = defineStore('story', {
     async continueStory(storyId: number, userAction: string) {
       this.isLoading = true
       this.error = null
-
-      this.startWatchdog() // 60 saniyelik sigortayı başlat
+      this.startWatchdog()
 
       try {
+        // userId silindi, güvenlik token üzerinden hallediliyor
         await axios.post(`${API_URL}/${storyId}/continue`, {
-          userId: 1,
           userAction: userAction,
         })
       } catch (err: any) {
@@ -74,17 +124,15 @@ export const useStoryStore = defineStore('story', {
       }
     },
 
-    // YENİ: Kara delik koruması
     startWatchdog() {
       this.stopWatchdog()
       this.watchdogTimer = window.setTimeout(() => {
         if (this.isLoading) {
-          this.error =
-            'Yapay zeka çok uzun süre yanıt vermedi. Lütfen tekrar deneyin veya sayfayı yenileyin.'
+          this.error = 'Yapay zeka çok yoğun, yanıt gecikti. Lütfen sayfayı yenileyin.'
           this.isLoading = false
-          this.disconnectStream() // Arızalı tüneli kes
+          this.disconnectStream() // Tarayıcı (canceled) hatasının ana sebebi bu satırdır
         }
-      }, 60000) // 60 saniye bekleme süresi
+      }, 180000) // 60000'den 180000'e (3 dakika) çıkardık!
     },
 
     stopWatchdog() {

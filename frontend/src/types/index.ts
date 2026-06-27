@@ -14,3 +14,23 @@ export interface StoryDetailResponse {
   locations: ElementDto[]
   items: ElementDto[]
 }
+
+export interface RegisterRequest {
+  username: string
+  email?: string
+  password: string
+}
+
+export interface AuthenticationRequest {
+  username: string
+  password: string
+}
+
+export interface AuthenticationResponse {
+  token: string
+}
+
+export interface CreateStoryRequest {
+  title: string
+  startingPrompt: string
+}

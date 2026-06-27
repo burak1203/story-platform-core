@@ -10,4 +10,5 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     // Google ile giriş yaparken veya normal kayıtta email kontrolü için kullanacağız
     Optional<User> findByEmail(String email);
+    Optional<User> findByUsername(String username);
 }
