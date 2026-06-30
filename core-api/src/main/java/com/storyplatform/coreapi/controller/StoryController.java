@@ -75,9 +75,19 @@ public class StoryController {
         return ResponseEntity.ok().build();
     }
 
+    // Hikaye metnini manuel düzenleme
+    @PutMapping("/{storyId}/content")
+    public ResponseEntity<StoryDetailResponse> editStoryContent(
+            @PathVariable Long storyId,
+            @RequestBody EditStoryRequest request,
+            @AuthenticationPrincipal User user) {
+        return ResponseEntity.ok(storyService.editStoryContent(storyId, user, request.newContent()));
+    }
+
     // --- FRONTEND İÇİN GÜNCELLENMİŞ JSON SÖZLEŞMELERİ ---
     // userId parametreleri kaldırıldı, güvenlik Spring Security'e devredildi.
 
     public record CreateStoryRequest(String title, String startingPrompt) {}
     public record StoryContinueRequest(String userAction) {}
+    public record EditStoryRequest(String newContent) {}
 }

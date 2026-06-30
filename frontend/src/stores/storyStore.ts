@@ -82,19 +82,21 @@ export const useStoryStore = defineStore('story', {
     connectToStream(storyId: number) {
       this.disconnectStream()
 
-      // KRİTİK DEĞİŞİKLİK: SSE tüneline JWT Token'ı URL üzerinden veriyoruz
       const token = localStorage.getItem('token')
       this.eventSource = new EventSource(`${API_URL}/${storyId}/stream?token=${token}`)
 
       this.eventSource.addEventListener('STORY_UPDATE', (event) => {
-        console.log("Backend'den güncel hikaye canlı olarak geldi!")
-        this.story = JSON.parse(event.data)
+        const updatedData = JSON.parse(event.data)
+
+        // Vue'nun reaktivitesini zorlamak için mevcut objeyi doğrudan yeni objeye eşitliyoruz.
+        // Eğer bu yine DOM'u tetiklemezse ileride Object.assign kullanacağız.
+        this.story = updatedData
+
         this.stopWatchdog()
-        this.isLoading = false
+        this.isLoading = false // Yapay zeka işini bitirdiğinde kilidi kaldır
       })
 
       this.eventSource.onerror = (err) => {
-        console.error('SSE Bağlantı Hatası veya Tünel Koptu.')
         this.disconnectStream()
       }
     },
@@ -113,14 +115,13 @@ export const useStoryStore = defineStore('story', {
       this.startWatchdog()
 
       try {
-        // userId silindi, güvenlik token üzerinden hallediliyor
         await axios.post(`${API_URL}/${storyId}/continue`, {
           userAction: userAction,
         })
       } catch (err: any) {
         this.error = err.message || 'Hamle gönderilemedi.'
         this.stopWatchdog()
-        this.isLoading = false
+        this.isLoading = false // KRİTİK: Hata alırsan butonu kilitten kurtar
       }
     },
 
@@ -139,6 +140,18 @@ export const useStoryStore = defineStore('story', {
       if (this.watchdogTimer) {
         clearTimeout(this.watchdogTimer)
         this.watchdogTimer = null
+      }
+    },
+    async editStory(storyId: number, newContent: string) {
+      this.isLoading = true
+      this.error = null
+      try {
+        const response = await axios.put(`${API_URL}/${storyId}/content`, { newContent })
+        this.story = response.data
+      } catch (err: any) {
+        this.error = err.message || 'Hikaye güncellenemedi.'
+      } finally {
+        this.isLoading = false
       }
     },
   },

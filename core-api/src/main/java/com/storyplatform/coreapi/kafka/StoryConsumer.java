@@ -32,6 +32,16 @@ public class StoryConsumer {
         String event = (String) payload.get("event");
         Long storyId = Long.valueOf(payload.get("storyId").toString());
 
+        // 1. VEKTÖR GÜNCELLEMESİ (Story objesini DB'den çekmeden doğrudan güncelliyoruz)
+        if ("EMBEDDING_UPDATED".equals(event)) {
+            List<Double> vectorList = (List<Double>) payload.get("embedding");
+            String vectorString = vectorList.toString();
+            storyRepository.updateEmbedding(storyId, vectorString);
+            System.out.println("Hikaye " + storyId + " için vektör hafızası başarıyla güncellendi.");
+            return;
+        }
+
+        // 2. DİĞER İŞLEMLER İÇİN STORY OBJESİNİ ÇEK (Sadece burada 1 kez tanımlanır)
         Story story = storyRepository.findById(storyId)
                 .orElseThrow(() -> new RuntimeException("Hikaye bulunamadı"));
 
@@ -58,7 +68,7 @@ public class StoryConsumer {
 
         Story savedStory = storyRepository.save(story);
 
-        // Karakterleri, Mekanları ve Nesneleri Kaydet (Önceki yazdığımız kodun aynısı)
+        // Karakterleri, Mekanları ve Nesneleri Kaydet
         List<Map<String, String>> charactersData = (List<Map<String, String>>) payload.get("characters");
         if (charactersData != null) {
             charactersData.forEach(c -> characterRepository.save(Character.builder()

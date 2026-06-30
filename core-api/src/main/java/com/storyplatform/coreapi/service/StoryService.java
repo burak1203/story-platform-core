@@ -177,4 +177,28 @@ public class StoryService {
 
         storyRepository.delete(story);
     }
+
+    @Transactional
+    public StoryDetailResponse editStoryContent(Long storyId, User user, String newContent) {
+        Story story = storyRepository.findById(storyId)
+                .orElseThrow(() -> new RuntimeException("Hikaye bulunamadı"));
+
+        if (!story.getUser().getId().equals(user.getId())) {
+            throw new RuntimeException("Bu hikayeyi düzenleme yetkiniz yok.");
+        }
+
+        // Metni güncelle ve kaydet
+        story.setContent(newContent);
+        Story savedStory = storyRepository.save(story);
+
+        // Python'a vektörü (hafızayı) baştan hesaplaması için emir veriyoruz
+        Map<String, Object> aiTask = Map.of(
+                "event", "UPDATE_EMBEDDING",
+                "storyId", savedStory.getId(),
+                "content", newContent
+        );
+        storyTaskProducer.sendTaskToPython(aiTask);
+
+        return mapToDetailResponse(savedStory);
+    }
 }

@@ -175,6 +175,23 @@ async def consume_messages():
         async for msg in consumer:
             task_data = msg.value
             event = task_data.get('event')
+
+            if event == "UPDATE_EMBEDDING":
+                story_id = task_data.get("storyId")
+                new_content = task_data.get("content")
+                
+                # 1. Yeni metnin vektörünü hesapla
+                embedding_vector = local_embedding_model.encode(new_content).tolist()
+                
+                # 2. Java'ya güncel vektörü geri yolla
+                response_payload = {
+                    "event": "EMBEDDING_UPDATED",
+                    "storyId": story_id,
+                    "embedding": embedding_vector # Liste formatında [0.1, -0.05, ...]
+                }
+                await producer.send_and_wait("story-completed-topic", value=response_payload)
+                print(f"[{story_id}] Embedding güncellendi ve gönderildi.")
+                continue # Döngüdeki diğer if'lere girmemesi için
             
             if event == 'GENERATE_STORY':
                 story_id = task_data.get('storyId')

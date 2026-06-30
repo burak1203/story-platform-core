@@ -8,6 +8,8 @@ const store = useStoryStore()
 const route = useRoute() // URL'yi okuyacak araç
 const userAction = ref('')
 const scrollContainer = ref<HTMLElement | null>(null)
+const isEditing = ref(false)
+const editableContent = ref('')
 
 // YENİ: ID'yi artık sabit '5' değil, URL'den (/studio/2) dinamik alıyoruz!
 const storyId = computed(() => Number(route.params.id))
@@ -43,6 +45,20 @@ const submitAction = async () => {
 
   // URL'deki doğru ID'ye hamleyi gönderiyoruz
   await store.continueStory(storyId.value, actionText)
+}
+// Düzenleme modunu aç/kapat
+const toggleEdit = () => {
+  if (!isEditing.value) {
+    editableContent.value = store.story?.content || ''
+  }
+  isEditing.value = !isEditing.value
+}
+
+// Yeni metni kaydet
+const saveEdit = async () => {
+  if (!editableContent.value.trim() || store.isLoading) return
+  await store.editStory(storyId.value, editableContent.value)
+  isEditing.value = false
 }
 </script>
 
@@ -83,11 +99,36 @@ const submitAction = async () => {
         ⚠️ {{ store.error }}
       </div>
       <!-- Hikaye Metni -->
-      <div
-        ref="scrollContainer"
-        class="flex-1 overflow-y-auto p-10 pb-32 prose prose-invert max-w-none prose-p:leading-relaxed prose-p:mb-6 prose-a:text-amber-500"
-        v-html="renderedContent"
-      ></div>
+      <div class="flex justify-end p-4 bg-slate-900 border-b border-slate-800">
+        <button
+          @click="toggleEdit"
+          class="text-sm bg-slate-800 hover:bg-slate-700 text-amber-500 px-4 py-2 rounded border border-slate-700 transition-colors"
+        >
+          {{ isEditing ? 'İptal' : 'Hikayeyi Düzenle' }}
+        </button>
+      </div>
+
+      <div ref="scrollContainer" class="flex-1 overflow-y-auto p-10 pb-32">
+        <div
+          v-if="!isEditing"
+          class="prose prose-invert max-w-none prose-p:leading-relaxed prose-p:mb-6 prose-a:text-amber-500"
+          v-html="renderedContent"
+        ></div>
+
+        <div v-else class="flex flex-col gap-4 h-full">
+          <textarea
+            v-model="editableContent"
+            class="flex-1 w-full bg-slate-900 border border-slate-700 rounded-lg p-6 text-gray-100 focus:outline-none focus:border-amber-500 resize-none leading-relaxed"
+          ></textarea>
+          <button
+            @click="saveEdit"
+            class="self-end bg-amber-600 hover:bg-amber-500 text-slate-900 font-bold px-8 py-3 rounded-lg transition-colors"
+            :disabled="store.isLoading"
+          >
+            {{ store.isLoading ? 'Kaydediliyor...' : 'Değişiklikleri Kaydet' }}
+          </button>
+        </div>
+      </div>
 
       <!-- Aksiyon Alanı -->
       <div
