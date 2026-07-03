@@ -21,6 +21,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
     private final UserDetailsService userDetailsService;
+    private final TokenBlacklistService tokenBlacklistService;
 
     @Override
     protected void doFilterInternal(
@@ -45,6 +46,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         // Hala token yoksa (public bir uç olabilir), filtreyi geç
         if (jwt == null) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+
+        // Logout edilmiş (kara listedeki) token'ları reddet
+        if (tokenBlacklistService.isBlacklisted(jwt)) {
             filterChain.doFilter(request, response);
             return;
         }

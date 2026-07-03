@@ -12,6 +12,8 @@ import com.storyplatform.coreapi.repository.StoryRepository;
 import com.storyplatform.coreapi.repository.UserRepository;
 import com.storyplatform.coreapi.kafka.StoryTaskProducer;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import com.storyplatform.coreapi.dto.ElementDto;
@@ -20,11 +22,38 @@ import com.storyplatform.coreapi.controller.StoryController.CreateStoryRequest;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class StoryService {
 
     private final StoryRepository storyRepository;
     private final UserRepository userRepository;
     private final StoryTaskProducer storyTaskProducer;
+    private final SseService sseService;
+    private final RestTemplate restTemplate;
+
+    @Value("${app.ai-worker.embed-url:http://localhost:8000/api/embed}")
+    private String aiWorkerEmbedUrl;
+
+    /**
+     * Kafka gönderimi asenkron olduğu için DB yazımıyla atomik değildir;
+     * gönderim başarısız olursa hikaye FAILED'e çekilir ve SSE ile bildirilir.
+     */
+    private void dispatchAiTask(Long storyId, Map<String, Object> aiTask) {
+        storyTaskProducer.sendTaskToPython(aiTask).whenComplete((result, ex) -> {
+            if (ex != null) {
+                log.error("Kafka gönderimi başarısız, hikaye {} FAILED olarak işaretleniyor", storyId, ex);
+                storyRepository.updateStatus(storyId, "FAILED");
+                try {
+                    sseService.sendStoryUpdate(storyId, Map.of(
+                            "type", "AI_ERROR",
+                            "message", "Görev kuyruğa gönderilemedi, lütfen tekrar deneyin."
+                    ));
+                } catch (Exception sseEx) {
+                    log.error("SSE hata bildirimi gönderilemedi: {}", sseEx.getMessage());
+                }
+            }
+        });
+    }
 
     // --- YENİ EKLENEN GÜVENLİK VE LİSTELEME METOTLARI ---
 
@@ -54,7 +83,7 @@ public class StoryService {
                 "userId", user.getId(),
                 "prompt", request.startingPrompt()
         );
-        storyTaskProducer.sendTaskToPython(aiTask);
+        dispatchAiTask(savedStory.getId(), aiTask);
 
         return mapToDetailResponse(savedStory);
     }
@@ -72,13 +101,18 @@ public class StoryService {
 
     // --- MEVCUT METOTLARIN GÜNCELLENMİŞ HALLERİ ---
 
-    @Transactional(readOnly = true)
+    @Transactional
     public void continueStory(Long userId, Long storyId, String userAction) {
         Story story = storyRepository.findById(storyId)
                 .orElseThrow(() -> new RuntimeException("Hikaye bulunamadı"));
 
         if (!story.getUser().getId().equals(userId)) {
             throw new RuntimeException("Bu hikayeye müdahale etme yetkiniz yok.");
+        }
+
+        // Eş zamanlı "devam et" istekleri eski içeriği ezer; üretim sürerken yenisi kabul edilmez
+        if ("PENDING".equals(story.getStatus())) {
+            throw new IllegalStateException("Bu hikaye için devam eden bir üretim var, lütfen tamamlanmasını bekleyin.");
         }
 
         List<Map<String, String>> characterList = story.getCharacters().stream()
@@ -112,16 +146,16 @@ public class StoryService {
                 "context", context
         );
 
-        storyTaskProducer.sendTaskToPython(aiTask);
+        story.setStatus("PENDING");
+        storyRepository.save(story);
+
+        dispatchAiTask(story.getId(), aiTask);
     }
 
     // Vektörel Arama (Değişmedi)
     public List<Story> searchSimilarStories(Long userId, String searchText) {
-        RestTemplate restTemplate = new RestTemplate();
-        String pythonApiUrl = "http://localhost:8000/api/embed";
-
         Map<String, String> requestBody = Map.of("text", searchText);
-        ResponseEntity<Map> response = restTemplate.postForEntity(pythonApiUrl, requestBody, Map.class);
+        ResponseEntity<Map> response = restTemplate.postForEntity(aiWorkerEmbedUrl, requestBody, Map.class);
 
         @SuppressWarnings("unchecked")
         List<Double> vectorList = (List<Double>) response.getBody().get("embedding");
@@ -198,6 +232,7 @@ public class StoryService {
                 "content", newContent
         );
         storyTaskProducer.sendTaskToPython(aiTask);
+        // Not: Embedding güncellemesi kritik durum değiştirmediği için FAILED işaretlemesi yapılmıyor
 
         return mapToDetailResponse(savedStory);
     }

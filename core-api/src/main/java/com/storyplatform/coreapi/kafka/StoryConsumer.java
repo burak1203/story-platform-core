@@ -6,6 +6,7 @@ import com.storyplatform.coreapi.entity.Location;
 import com.storyplatform.coreapi.entity.Item;
 import com.storyplatform.coreapi.repository.*;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 import java.util.List;
@@ -16,6 +17,7 @@ import com.storyplatform.coreapi.dto.StoryDetailResponse;
 
 @Component
 @RequiredArgsConstructor
+@Slf4j
 public class StoryConsumer {
 
     private final StoryRepository storyRepository;
@@ -34,7 +36,10 @@ public class StoryConsumer {
         // Eğer pythondan hata geldiyse doğrudan frontende fırlat ve çık
         if ("ERROR".equals(event)) {
             String errorMessage = (String) payload.get("message");
-            System.err.println("Python'dan Hata Raporu Geldi: " + errorMessage);
+            log.error("Python'dan Hata Raporu Geldi: {}", errorMessage);
+
+            // Hikaye PENDING'de takılı kalmasın diye FAILED'e çekiyoruz
+            storyRepository.updateStatus(storyId, "FAILED");
 
             try {
                 // Frontend'in anlayacağı formatta özel bir hata nesnesi yolluyoruz
@@ -44,7 +49,7 @@ public class StoryConsumer {
                 );
                 sseService.sendStoryUpdate(storyId, errorData);
             } catch (Exception e) {
-                System.err.println("Hata mesajı SSE ile gönderilemedi: " + e.getMessage());
+                log.error("Hata mesajı SSE ile gönderilemedi: {}", e.getMessage());
             }
             return; // Metodu burada kes, veritabanı işlemlerine girmesin
         }
@@ -54,7 +59,7 @@ public class StoryConsumer {
             List<Double> vectorList = (List<Double>) payload.get("embedding");
             String vectorString = vectorList.toString();
             storyRepository.updateEmbedding(storyId, vectorString);
-            System.out.println("Hikaye " + storyId + " için vektör hafızası başarıyla güncellendi.");
+            log.info("Hikaye {} için vektör hafızası başarıyla güncellendi.", storyId);
             return;
         }
 
@@ -67,13 +72,13 @@ public class StoryConsumer {
             String summary = (String) payload.get("summary");
             story.setCurrentSummary(summary);
             storyRepository.save(story);
-            System.out.println("Hikaye " + storyId + " için Dinamik Özet arka planda güncellendi.");
+            log.info("Hikaye {} için Dinamik Özet arka planda güncellendi.", storyId);
             try {
                 StoryDetailResponse updatedDetails = storyService.getStoryDetails(storyId);
                 sseService.sendStoryUpdate(storyId, updatedDetails);
-                System.out.println("Özet güncellemesi SSE ile Frontend'e fırlatıldı.");
+                log.info("Özet güncellemesi SSE ile Frontend'e fırlatıldı.");
             } catch (Exception e) {
-                System.err.println("Özet SSE ile gönderilemedi: " + e.getMessage());
+                log.error("Özet SSE ile gönderilemedi: {}", e.getMessage());
             }
             return;
         }
@@ -112,19 +117,19 @@ public class StoryConsumer {
                     .name(i.get("name")).description(i.get("description")).story(savedStory).build()));
         }
 
-        System.out.println("Hikaye " + storyId + " güncellendi. (Hamle Sayısı: " + savedStory.getActionCount() + ")");
+        log.info("Hikaye {} güncellendi. (Hamle Sayısı: {})", storyId, savedStory.getActionCount());
 
         try {
             StoryDetailResponse updatedDetails = storyService.getStoryDetails(storyId);
             sseService.sendStoryUpdate(storyId, updatedDetails);
-            System.out.println("SSE ile Frontend'e canlı güncelleme gönderildi.");
+            log.info("SSE ile Frontend'e canlı güncelleme gönderildi.");
         } catch (Exception e) {
-            System.err.println("SSE gönderimi başarısız: " + e.getMessage());
+            log.error("SSE gönderimi başarısız: {}", e.getMessage());
         }
 
         // ÖZETLEME TETİKLEYİCİSİ: Her 3 hamlede bir asenkron özet görevi yolla
         if (savedStory.getActionCount() % 3 == 0) {
-            System.out.println("Hikaye " + storyId + " uzadı. Arka planda özetleme motoru tetikleniyor...");
+            log.info("Hikaye {} uzadı. Arka planda özetleme motoru tetikleniyor...", storyId);
             Map<String, Object> summarizeTask = Map.of(
                     "event", "SUMMARIZE_STORY",
                     "storyId", savedStory.getId(),

@@ -12,7 +12,7 @@ public class KafkaTopicConfig {
     @Bean
     public NewTopic storyTasksTopic() {
         return TopicBuilder.name("story-tasks-topic")
-                .partitions(1)
+                .partitions(3)
                 .replicas(1)
                 .build();
     }
@@ -21,7 +21,7 @@ public class KafkaTopicConfig {
     @Bean
     public NewTopic storyCompletedTopic() {
         return TopicBuilder.name("story-completed-topic")
-                .partitions(1)
+                .partitions(3)
                 .replicas(1)
                 .build();
     }

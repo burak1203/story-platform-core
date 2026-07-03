@@ -23,6 +23,13 @@ public interface StoryRepository extends JpaRepository<Story, Long> {
     // YENİ EKLENEN METOT
     @Modifying
     @Transactional
-    @Query(value = "UPDATE stories SET embedding = cast(:embedding as vector) WHERE id = :storyId", nativeQuery = true)
+    @Query(value = "UPDATE stories SET embedding = cast(:embedding as vector), updated_at = now() WHERE id = :storyId", nativeQuery = true)
     void updateEmbedding(@Param("storyId") Long storyId, @Param("embedding") String embedding);
+
+    @Modifying
+    @Transactional
+    @Query(value = "UPDATE stories SET status = :status, updated_at = now() WHERE id = :storyId", nativeQuery = true)
+    void updateStatus(@Param("storyId") Long storyId, @Param("status") String status);
+
+    List<Story> findByStatusAndUpdatedAtBefore(String status, java.time.LocalDateTime threshold);
 }

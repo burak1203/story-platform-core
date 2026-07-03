@@ -2,6 +2,9 @@ package com.storyplatform.coreapi.controller;
 
 import com.storyplatform.coreapi.entity.Story;
 import com.storyplatform.coreapi.service.StoryService;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -17,7 +20,6 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/stories")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "http://localhost:5173")
 public class StoryController {
 
     private final StoryService storyService;
@@ -30,7 +32,7 @@ public class StoryController {
 
     @PostMapping
     public ResponseEntity<StoryDetailResponse> createStory(
-            @RequestBody CreateStoryRequest request,
+            @Valid @RequestBody CreateStoryRequest request,
             @AuthenticationPrincipal User user) {
         return ResponseEntity.ok(storyService.createStory(user, request));
     }
@@ -46,7 +48,7 @@ public class StoryController {
     @PostMapping("/{storyId}/continue")
     public ResponseEntity<Void> continueStory(
             @PathVariable Long storyId,
-            @RequestBody StoryContinueRequest request,
+            @Valid @RequestBody StoryContinueRequest request,
             @AuthenticationPrincipal User user) {
 
         // Doğrudan ID ve action gönderiyoruz, Service katmanı güvenliği kontrol ediyor
@@ -79,7 +81,7 @@ public class StoryController {
     @PutMapping("/{storyId}/content")
     public ResponseEntity<StoryDetailResponse> editStoryContent(
             @PathVariable Long storyId,
-            @RequestBody EditStoryRequest request,
+            @Valid @RequestBody EditStoryRequest request,
             @AuthenticationPrincipal User user) {
         return ResponseEntity.ok(storyService.editStoryContent(storyId, user, request.newContent()));
     }
@@ -87,7 +89,11 @@ public class StoryController {
     // --- FRONTEND İÇİN GÜNCELLENMİŞ JSON SÖZLEŞMELERİ ---
     // userId parametreleri kaldırıldı, güvenlik Spring Security'e devredildi.
 
-    public record CreateStoryRequest(String title, String startingPrompt) {}
-    public record StoryContinueRequest(String userAction) {}
-    public record EditStoryRequest(String newContent) {}
+    public record CreateStoryRequest(
+            @NotBlank @Size(max = 200) String title,
+            @NotBlank @Size(max = 2000) String startingPrompt) {}
+    public record StoryContinueRequest(
+            @NotBlank @Size(max = 2000) String userAction) {}
+    public record EditStoryRequest(
+            @NotBlank String newContent) {}
 }

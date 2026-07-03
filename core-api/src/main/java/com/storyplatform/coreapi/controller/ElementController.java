@@ -10,7 +10,6 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api/elements")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "http://localhost:5173")
 public class ElementController {
 
     private final ElementService elementService;

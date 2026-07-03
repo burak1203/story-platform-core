@@ -55,7 +55,13 @@ export const useAuthStore = defineStore('auth', {
       }
     },
 
-    logout() {
+    async logout() {
+      try {
+        // Token'ı sunucu tarafında da geçersiz kıl (kara liste)
+        await axios.post(`${API_URL}/logout`)
+      } catch {
+        // Sunucuya ulaşılamasa bile yerel oturumu kapat
+      }
       this.token = null
       this.isAuthenticated = false
       localStorage.removeItem('token')

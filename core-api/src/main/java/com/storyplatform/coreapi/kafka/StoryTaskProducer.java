@@ -3,7 +3,10 @@ package com.storyplatform.coreapi.kafka;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.kafka.support.SendResult;
 import org.springframework.stereotype.Service;
+
+import java.util.concurrent.CompletableFuture;
 
 @Service
 @RequiredArgsConstructor
@@ -17,8 +20,8 @@ public class StoryTaskProducer {
     private static final String TOPIC = "story-tasks-topic";
 
     // İleride Controller'dan veya Service'den bu metodu çağırıp Python'a JSON fırlatacağız
-    public void sendTaskToPython(Object taskPayload) {
+    public CompletableFuture<SendResult<String, Object>> sendTaskToPython(Object taskPayload) {
         log.info("Kafka kuyruğuna AI görevi fırlatılıyor: {}", taskPayload);
-        kafkaTemplate.send(TOPIC, taskPayload);
+        return kafkaTemplate.send(TOPIC, taskPayload);
     }
 }

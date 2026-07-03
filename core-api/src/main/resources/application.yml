@@ -20,7 +20,13 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
 
-  # 2. Asenkron Mesajlaşma (Kafka) Bağlantısı
+  # 2. Redis (JWT kara listesi için)
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+  # 3. Asenkron Mesajlaşma (Kafka) Bağlantısı
   kafka:
     bootstrap-servers: localhost:9092
     producer:
@@ -35,3 +41,15 @@ spring:
         spring.json.trusted.packages: "*"
         spring.json.value.default.type: java.util.Map
         spring.json.use.type.headers: false
+# Uygulama seviyesinde tek noktadan yönetilen ayarlar
+app:
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+  jwt:
+    secret-key: ${JWT_SECRET_KEY:404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970}
+    expiration-ms: ${JWT_EXPIRATION_MS:86400000}
+  ai-worker:
+    embed-url: ${AI_WORKER_EMBED_URL:http://localhost:8000/api/embed}
+  story:
+    pending-timeout-minutes: 5
+    pending-check-interval-ms: 60000

@@ -6,6 +6,7 @@ import com.storyplatform.coreapi.dto.RegisterRequest;
 import com.storyplatform.coreapi.entity.User;
 import com.storyplatform.coreapi.repository.UserRepository;
 import com.storyplatform.coreapi.security.JwtService;
+import com.storyplatform.coreapi.security.TokenBlacklistService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -20,6 +21,7 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final AuthenticationManager authenticationManager;
+    private final TokenBlacklistService tokenBlacklistService;
 
     public AuthenticationResponse register(RegisterRequest request) {
         // Kullanıcıyı oluştur ve şifresini hash'le
@@ -57,5 +59,10 @@ public class AuthService {
         return AuthenticationResponse.builder()
                 .token(jwtToken)
                 .build();
+    }
+
+    public void logout(String token) {
+        long remainingMillis = jwtService.extractExpiration(token).getTime() - System.currentTimeMillis();
+        tokenBlacklistService.blacklist(token, remainingMillis);
     }
 }

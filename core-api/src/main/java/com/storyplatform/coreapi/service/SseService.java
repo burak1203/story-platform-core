@@ -1,5 +1,6 @@
 package com.storyplatform.coreapi.service;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -10,6 +11,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 @Service
+@Slf4j
 public class SseService {
 
     // KRİTİK: Long yerine String kullanıyoruz ki Kafka'dan gelen Integer/Long tip çakışmaları yaşanmasın
@@ -25,7 +27,7 @@ public class SseService {
         emitter.onTimeout(() -> removeEmitter(key, emitter));
         emitter.onError((e) -> removeEmitter(key, emitter));
 
-        System.out.println("Tünel açıldı, dinleniyor: HİKAYE ID -> " + key);
+        log.info("Tünel açıldı, dinleniyor: HİKAYE ID -> {}", key);
         return emitter;
     }
 
@@ -48,14 +50,14 @@ public class SseService {
                 try {
                     // Veriyi Frontend'e fırlat
                     emitter.send(SseEmitter.event().name("STORY_UPDATE").data(data));
-                    System.out.println("BAŞARILI: SSE verisi Frontend'e fırlatıldı! HİKAYE ID -> " + key);
+                    log.info("SSE verisi Frontend'e gönderildi. HİKAYE ID -> {}", key);
                 } catch (IOException e) {
                     emitter.complete();
                     removeEmitter(key, emitter);
                 }
             }
         } else {
-            System.err.println("DİKKAT: " + key + " ID'li hikaye için açık bir tünel bulunamadı! Frontend tüneli koparmış olabilir.");
+            log.warn("{} ID'li hikaye için açık bir SSE tüneli bulunamadı.", key);
         }
     }
 }
