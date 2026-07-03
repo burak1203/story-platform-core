@@ -1,10 +1,11 @@
 from fastapi import FastAPI
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
-from openai import AsyncOpenAI
 from sentence_transformers import SentenceTransformer
 from dotenv import load_dotenv
 from pydantic import BaseModel
+import google.generativeai as genai
 import asyncio
+import re
 import json
 import os
 
@@ -13,146 +14,213 @@ load_dotenv()
 
 app = FastAPI(title="Story AI Worker")
 
-# 1. Hikayeyi yazacak olan OpenRouter istemcisi
-openrouter_client = AsyncOpenAI(
-    base_url="https://openrouter.ai/api/v1",
-    api_key=os.getenv("OPENROUTER_API_KEY"),
-)
+# 1. Gemini İstemcisi Yapılandırması
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
 # 2. ÜCRETSİZ VE YEREL HAFIZA MOTORU (Hugging Face)
 print("Hugging Face Embedding modeli yerel hafızaya yükleniyor...")
 local_embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
 
-async def generate_story_and_embedding(prompt: str):
-    print("Model (Free) hikayeyi kurguluyor ve elementleri ayıklıyor...")
+# Temel model versiyonunu globalde tutuyoruz
+GEMINI_MODEL_VERSION = 'gemini-3.5-flash'
+
+def parse_llm_json(raw_text: str) -> dict:
+    """
+    Yapay zeka çıktısını temizler ve ilk geçerli JSON objesini döner.
+    Canvas tetiklenmesini engellemek için tırnak ve regex kullanımı optimize edilmiştir.
+    """
+    # 1. Markdown bloğunu temizce yakala.
+    match = re.search(r'```(?:json)?\s*(.*?)\s*```', raw_text, re.DOTALL)
     
-    system_instruction = (
-        "Sen usta bir yazarsın. Gelen talebe göre Türkçe bir hikaye yazmalı ve hikayedeki "
-        "en önemli karakterleri, mekanları ve nesneleri ayıklamalısın. "
-        "Cevabını KESİNLİKLE başka hiçbir açıklama metni eklemeden, doğrudan şu geçerli JSON formatında dönmelisin:\n"
-        "{\n"
-        '  "content": "Yazdığın hikaye metni buraya...",\n'
-        '  "characters": [{"name": "Karakter Adı", "description": "Hikayedeki rolü ve kısa açıklaması"}],\n'
-        '  "locations": [{"name": "Mekan Adı", "description": "Kısa açıklama"}],\n'
-        '  "items": [{"name": "Nesne Adı", "description": "Önemli nesne açıklaması"}]\n'
-        "}"
+    if match:
+        clean_text = match.group(1).strip()
+        try:
+            return json.loads(clean_text)
+        except json.JSONDecodeError:
+            pass 
+            
+    # 2. Fallback: Metin içindeki ilk tam JSON bloğunu parantez sayarak ayıkla.
+    # AI'nın JSON dışında metin yazması durumunda JSON'u izole eder.
+    start_idx = raw_text.find('{')
+    if start_idx == -1:
+        raise ValueError("Yapay zekanın cevabında JSON iskeleti bulunamadı.")
+        
+    brace_count = 0
+    end_idx = -1
+    
+    for i in range(start_idx, len(raw_text)):
+        if raw_text[i] == '{':
+            brace_count += 1
+        elif raw_text[i] == '}':
+            brace_count -= 1
+            if brace_count == 0:
+                end_idx = i
+                break
+                
+    if end_idx != -1:
+        clean_text = raw_text[start_idx:end_idx+1]
+        try:
+            return json.loads(clean_text)
+        except json.JSONDecodeError as e:
+            print(f"JSON parse edilemedi: {e}\nHam Metin: {clean_text}")
+            raise e
+    else:
+        raise ValueError("JSON süslü parantezleri kapatılmamış veya yarım kalmış.")
+
+async def generate_story_and_embedding(prompt: str):
+    print("Model hikayeyi kurguluyor ve elementleri ayıklıyor...")
+    
+    system_instruction = """[KİMLİK VE TON]
+Sen usta, yaratıcı ve sürükleyici bir yazarsın. Betimlemelerin güçlü, diyalogların doğaldır. Asla klişe kalıplar kullanma.
+
+[GÖREV]
+Kullanıcının verdiği konuya göre akıcı bir hikaye yaz. 
+Ardından bu hikayedeki karakterleri, mekanları ve eşyaları çıkar.
+
+[ÇIKTI FORMATI - KESİN KURAL]
+Cevabını SADECE VE SADECE aşağıdaki JSON formatında ver. JSON dışında tek bir kelime, selamlama veya açıklama yazma:
+{
+  "content": "Yazdığın sürükleyici hikayenin tamamı...",
+  "characters": [{"name": "Karakter Adı", "description": "Fiziksel özelliği ve rolü"}],
+  "locations": [{"name": "Mekan Adı", "description": "Atmosferi ve detayı"}],
+  "items": [{"name": "Nesne Adı", "description": "Özelliği"}]
+}"""
+
+    model = genai.GenerativeModel(
+        model_name=GEMINI_MODEL_VERSION,
+        system_instruction=system_instruction
+    )
+    
+    generation_config = genai.types.GenerationConfig(
+        temperature=0.8,
+        max_output_tokens=8192,
+        response_mime_type="application/json"
     )
 
-    chat_response = await openrouter_client.chat.completions.create(
-        model="google/gemma-4-26b-a4b-it:free",
-        messages=[
-            {"role": "system", "content": system_instruction},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.7,
-        max_tokens=2000
+    response = await model.generate_content_async(
+        f"Hikaye Konusu: {prompt}",
+        generation_config=generation_config
     )
     
-    raw_output = chat_response.choices[0].message.content
-    if raw_output.startswith("```json"):
-        raw_output = raw_output.strip("```json").strip("```").strip()
+    raw_output = response.text
+    
+    # Regex ile JSON bloğunu güvenli şekilde ayıklama (Halüsinasyon koruması)
+    json_match = re.search(r'\{.*\}', raw_output, re.DOTALL)
+    if not json_match:
+        raise ValueError("Model geçerli bir JSON döndürmedi.")
         
-    parsed_json = json.loads(raw_output)
+    parsed_json = parse_llm_json(raw_output)
     story_text = parsed_json.get("content", "")
 
-    print("Hikaye yerel Hugging Face modeliyle vektöre çevriliyor...")
+    print("Vektör işlemi başlatılıyor...")
     loop = asyncio.get_event_loop()
     embedding_vector = await loop.run_in_executor(
-        None, 
-        lambda: local_embedding_model.encode(story_text).tolist()
+        None, lambda: local_embedding_model.encode(story_text).tolist()
     )
     
     return parsed_json, embedding_vector
 
+
 async def summarize_story_content(story_content: str):
-    print("Gemma 4 arka planda hikayeyi özetliyor...")
+    print("Model arka planda hikayeyi özetliyor...")
+    
     system_instruction = (
         "Sen usta bir editörsün. Aşağıda verilen hikayeyi okuyup ana olay örgüsünü, "
         "karakterlerin son durumunu ve motivasyonlarını içeren kısa ama kapsamlı bir özet "
         "(maksimum 2 paragraf) yazacaksın. Cevabına SADECE Türkçe özet metnini yaz, başka hiçbir açıklama yapma."
     )
     
-    chat_response = await openrouter_client.chat.completions.create(
-        model="google/gemma-4-26b-a4b-it:free",
-        messages=[
-            {"role": "system", "content": system_instruction},
-            {"role": "user", "content": f"Şu hikayeyi özetle:\n\n{story_content}"}
-        ],
-        temperature=0.5,
-        max_tokens=800
+    model = genai.GenerativeModel(
+        model_name=GEMINI_MODEL_VERSION,
+        system_instruction=system_instruction
     )
-    return chat_response.choices[0].message.content.strip()
+    
+    generation_config = genai.types.GenerationConfig(
+        temperature=0.5,
+        max_output_tokens=800
+    )
+    
+    response = await model.generate_content_async(
+        f"Şu hikayeyi özetle:\n\n{story_content}",
+        generation_config=generation_config
+    )
+    
+    return response.text.strip()
+
 
 async def continue_story_and_embedding(user_action: str, context: dict):
-    print("Gemma 4 (Free) geçmiş bağlamı okuyor ve hikayeyi devam ettiriyor...")
+    print("Model arka planda hikayeyi devam ettiriyor...")
     
     previous_content = context.get("previousContent", "")
     story_so_far = context.get("storySoFar", "")
-    characters = context.get("characters", [])
-    locations = context.get("locations", [])
-    items = context.get("items", [])
-    summary_block = f"\n[ŞU ANA KADARKİ HİKAYE ÖZETİ]:\n{story_so_far}\n" if story_so_far else ""
+    
+    # Bilinen evreni sadece isimleriyle veriyoruz ki modelin kafası karışmasın
+    known_characters = [c["name"] for c in context.get("characters", [])]
+    
+    summary_block = f"\n[ÖZET]:\n{story_so_far}\n" if story_so_far else ""
 
-    # Modeli halüsinasyondan korumak için mevcut evreni string'e çeviriyoruz
-    knowledge_base = json.dumps({
-        "Mevcut Karakterler": characters,
-        "Mevcut Mekanlar": locations,
-        "Mevcut Eşyalar": items
-    }, ensure_ascii=False, indent=2)
+    system_instruction = f"""[KİMLİK]
+Sen interaktif bir RPG oyun kurucususun.
 
-    system_instruction = f"""Sen usta bir RPG oyun kurucusu ve yazarsın.
-Aşağıda hikayenin geçmişi ve şu an evrende var olan elementler verilmiştir.
 {summary_block}
-[HİKAYE GEÇMİŞİ]:
+[SON BÖLÜM]:
 {previous_content}
 
-[BİLİNEN EVREN (BUNLARI YENİDEN ÜRETMEYECEKSİN)]:
-{knowledge_base}
+[BİLİNEN KARAKTERLER LİSTESİ]:
+{known_characters}
 
-Kullanıcının yaptığı son hamle/eylem şudur: "{user_action}"
+[GÖREV]
+Kullanıcının hamlesine ("{user_action}") göre hikayenin SADECE DEVAMINI yaz.
 
-GÖREVİN:
-1. Kullanıcının hamlesine göre hikayenin SADECE DEVAMINI yaz. Hikayeyi baştan anlatma, kaldığı yerden akıcı bir şekilde devam et.
-2. Eğer bu yeni bölümde *daha önce evrende olmayan yeni* bir karakter, mekan veya eşya ortaya çıktıysa, bunları ayıkla.
-3. Cevabını KESİNLİKLE başka hiçbir açıklama metni eklemeden, doğrudan şu geçerli JSON formatında dön:
+[JSON ÇIKTI FORMATI]
+Sadece geçerli JSON dön:
 {{
-  "content": "Sadece yeni yazdığın hikaye bölümü buraya...",
-  "characters": [{{"name": "Yeni Karakter", "description": "Kim olduğu"}}],
-  "locations": [{{"name": "Yeni Mekan", "description": "Nasıl bir yer"}}],
-  "items": [{{"name": "Yeni Eşya", "description": "Ne işe yaradığı"}}]
+  "content": "Sadece yeni yazdığın kısım...",
+  "new_characters": [{{"name": "Yeni Karakter", "description": "Kim olduğu"}}],
+  "updated_characters": [{{"name": "Bilinen Karakterin Adı", "status_change": "Bu bölümde ne yaptı/durumu nasıl değişti (Örn: Orochimaru'nun kolu koptu)"}}],
+  "new_locations": [],
+  "new_items": []
 }}
-Eğer metinde yeni bir şey yoksa, o listeleri boş bırak ([]). Bilinen evrendeki eski elementleri tekrar JSON'a ekleme.
+Not: Bilinen karakterler yeni bir eylem yaparsa 'updated_characters' içine ekle.
 """
 
-    chat_response = await openrouter_client.chat.completions.create(
-        model="google/gemma-4-26b-a4b-it:free",
-        messages=[
-            {"role": "system", "content": system_instruction},
-            {"role": "user", "content": f"Hamlem: {user_action}\nHikayeyi devam ettir ve JSON dön."}
-        ],
-        temperature=0.7,
-        max_tokens=2000
+    model = genai.GenerativeModel(
+        model_name=GEMINI_MODEL_VERSION,
+        system_instruction=system_instruction
     )
     
-    raw_output = chat_response.choices[0].message.content
-    if raw_output.startswith("```json"):
-        raw_output = raw_output.strip("```json").strip("```").strip()
-        
-    parsed_json = json.loads(raw_output)
+    generation_config = genai.types.GenerationConfig(
+        temperature=0.7,
+        max_output_tokens=8192,
+        response_mime_type="application/json"
+    )
+
+    response = await model.generate_content_async(
+        f"Hamlem: {user_action}",
+        generation_config=generation_config
+    )
+    
+    raw_output = response.text
+    
+    # Regex zırhı
+    json_match = re.search(r'\{.*\}', raw_output, re.DOTALL)
+    if json_match:
+        parsed_json = parse_llm_json(raw_output)
+    else:
+        parsed_json = {"content": "Sistem hatası: Model JSON dönemedi."}
+
     new_story_segment = parsed_json.get("content", "")
-
-    # Eski hikaye ile yeni üretilen bölümü birleştir
     full_story_content = previous_content + "\n\n" + new_story_segment
-    parsed_json["content"] = full_story_content # Java'ya birleştirilmiş halini yollayacağız
+    parsed_json["content"] = full_story_content
 
-    print("Güncellenmiş hikaye yerel modelle vektöre çevriliyor...")
+    print("Güncellenmiş hikaye vektöre çevriliyor...")
     loop = asyncio.get_event_loop()
     embedding_vector = await loop.run_in_executor(
-        None, 
-        lambda: local_embedding_model.encode(full_story_content).tolist()
+        None, lambda: local_embedding_model.encode(full_story_content).tolist()
     )
     
     return parsed_json, embedding_vector
+
 
 async def consume_messages():
     consumer = AIOKafkaConsumer(
@@ -169,7 +237,7 @@ async def consume_messages():
     
     await consumer.start()
     await producer.start()
-    print("🎧 AI Worker (Model free & Local Embedding) dinliyor...")
+    print("🎧 AI Worker (Gemini Flash & Local Embedding) dinliyor...")
     
     try:
         async for msg in consumer:
@@ -214,7 +282,14 @@ async def consume_messages():
                     await producer.send_and_wait('story-completed-topic', result_payload)
                     print(f"[{story_id}] Hikaye ve yerel vektör Java'ya başarıyla teslim edildi.")
                 except Exception as e:
-                    print(f"HATA: Yapay zeka işlemi başarısız oldu - {e}")
+                    error_msg = str(e)
+                    print(f"HATA: Yapay zeka işlemi başarısız oldu - {error_msg}")
+                    error_payload = {
+                        "event": "ERROR",
+                        "storyId": story_id,
+                        "message": f"Yapay zeka motoru yeni hikaye üretemedi (Limit veya Sunucu Hatası). Detay: {error_msg[:150]}..."
+                    }
+                    await producer.send_and_wait('story-completed-topic', error_payload)
                     
             elif event == 'CONTINUE_STORY':
                 story_id = task_data.get('storyId')
@@ -237,8 +312,16 @@ async def consume_messages():
                     
                     await producer.send_and_wait('story-completed-topic', result_payload)
                     print(f"[{story_id}] Güncellenmiş hikaye (RAG Enjeksiyonlu) Java'ya teslim edildi.")
+
                 except Exception as e:
-                    print(f"HATA: Devam işlemi başarısız oldu - {e}")
+                    error_msg = str(e)
+                    print(f"HATA: Devam işlemi başarısız oldu - {error_msg}")
+                    error_payload = {
+                        "event": "ERROR",
+                        "storyId": story_id,
+                        "message": f"Yapay zeka hikayeye devam edemedi (Limit veya Sunucu Hatası). Detay: {error_msg[:150]}..."
+                    }
+                    await producer.send_and_wait('story-completed-topic', error_payload)
 
             elif event == 'SUMMARIZE_STORY':
                 story_id = task_data.get('storyId')
@@ -247,11 +330,13 @@ async def consume_messages():
                 
                 try:
                     summary_text = await summarize_story_content(full_content)
+                    
                     result_payload = {
                         "event": "STORY_SUMMARIZED",
                         "storyId": story_id,
                         "summary": summary_text
                     }
+                    
                     await producer.send_and_wait('story-completed-topic', result_payload)
                     print(f"[{story_id}] Özet çıkarıldı ve Java'ya teslim edildi.")
                 except Exception as e:
@@ -261,12 +346,15 @@ async def consume_messages():
         await consumer.stop()
         await producer.stop()
 
+
 @app.on_event("startup")
 async def startup_event():
     asyncio.create_task(consume_messages())
 
+
 class SearchQuery(BaseModel):
     text: str
+
 
 @app.post("/api/embed")
 async def get_embedding_for_search(query: SearchQuery):

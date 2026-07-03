@@ -31,6 +31,23 @@ public class StoryConsumer {
     public void consumeStoryResult(Map<String, Object> payload) {
         String event = (String) payload.get("event");
         Long storyId = Long.valueOf(payload.get("storyId").toString());
+        // Eğer pythondan hata geldiyse doğrudan frontende fırlat ve çık
+        if ("ERROR".equals(event)) {
+            String errorMessage = (String) payload.get("message");
+            System.err.println("Python'dan Hata Raporu Geldi: " + errorMessage);
+
+            try {
+                // Frontend'in anlayacağı formatta özel bir hata nesnesi yolluyoruz
+                Map<String, String> errorData = Map.of(
+                        "type", "AI_ERROR",
+                        "message", errorMessage
+                );
+                sseService.sendStoryUpdate(storyId, errorData);
+            } catch (Exception e) {
+                System.err.println("Hata mesajı SSE ile gönderilemedi: " + e.getMessage());
+            }
+            return; // Metodu burada kes, veritabanı işlemlerine girmesin
+        }
 
         // 1. VEKTÖR GÜNCELLEMESİ (Story objesini DB'den çekmeden doğrudan güncelliyoruz)
         if ("EMBEDDING_UPDATED".equals(event)) {
@@ -51,8 +68,16 @@ public class StoryConsumer {
             story.setCurrentSummary(summary);
             storyRepository.save(story);
             System.out.println("Hikaye " + storyId + " için Dinamik Özet arka planda güncellendi.");
+            try {
+                StoryDetailResponse updatedDetails = storyService.getStoryDetails(storyId);
+                sseService.sendStoryUpdate(storyId, updatedDetails);
+                System.out.println("Özet güncellemesi SSE ile Frontend'e fırlatıldı.");
+            } catch (Exception e) {
+                System.err.println("Özet SSE ile gönderilemedi: " + e.getMessage());
+            }
             return;
         }
+
 
         // --- NORMAL HİKAYE ÜRETİM VEYA DEVAM İŞLEMİ ---
         String content = (String) payload.get("content");

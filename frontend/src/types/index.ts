@@ -1,4 +1,5 @@
 export interface ElementDto {
+  id: number
   name: string
   description: string
 }

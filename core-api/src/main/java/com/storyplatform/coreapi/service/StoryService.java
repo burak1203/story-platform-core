@@ -141,15 +141,15 @@ public class StoryService {
     // YARDIMCI METOT: Tüm kod tekrarlarını önleyen Null Korumalı DTO dönüştürücü
     private StoryDetailResponse mapToDetailResponse(Story story) {
         List<ElementDto> characters = (story.getCharacters() == null ? new java.util.ArrayList<com.storyplatform.coreapi.entity.Character>() : story.getCharacters()).stream()
-                .map(c -> new ElementDto(c.getName(), c.getDescription()))
+                .map(c -> new ElementDto(c.getId(), c.getName(), c.getDescription()))
                 .toList();
 
         List<ElementDto> locations = (story.getLocations() == null ? new java.util.ArrayList<com.storyplatform.coreapi.entity.Location>() : story.getLocations()).stream()
-                .map(l -> new ElementDto(l.getName(), l.getDescription()))
+                .map(l -> new ElementDto(l.getId(), l.getName(), l.getDescription()))
                 .toList();
 
         List<ElementDto> items = (story.getItems() == null ? new java.util.ArrayList<com.storyplatform.coreapi.entity.Item>() : story.getItems()).stream()
-                .map(i -> new ElementDto(i.getName(), i.getDescription()))
+                .map(i -> new ElementDto(i.getId(), i.getName(), i.getDescription()))
                 .toList();
 
         return new StoryDetailResponse(

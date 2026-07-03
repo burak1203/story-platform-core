@@ -88,12 +88,19 @@ export const useStoryStore = defineStore('story', {
       this.eventSource.addEventListener('STORY_UPDATE', (event) => {
         const updatedData = JSON.parse(event.data)
 
-        // Vue'nun reaktivitesini zorlamak için mevcut objeyi doğrudan yeni objeye eşitliyoruz.
-        // Eğer bu yine DOM'u tetiklemezse ileride Object.assign kullanacağız.
-        this.story = updatedData
+        // Hata mesajı varsa
+        if (updatedData.type === 'AI_ERROR') {
+          this.error = updatedData.message
+          this.isLoading = false
+          this.stopWatchdog()
+          return // İşlemi kes, hikaye metnini bozma
+        }
 
+        // NORMAL İŞLEYİŞ: Gelen veri gerçek bir hikaye güncellemesiyse
+        this.story = updatedData
+        this.error = null // Varsa eski hatayı temizle
+        this.isLoading = false
         this.stopWatchdog()
-        this.isLoading = false // Yapay zeka işini bitirdiğinde kilidi kaldır
       })
 
       this.eventSource.onerror = (err) => {
